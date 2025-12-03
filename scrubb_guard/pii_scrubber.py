@@ -10,7 +10,8 @@ REGEX_PATTERNS = {
     "IBAN": r"\bDE\d{2}\s?(?:\d{4}\s?){4}\d{2}\b",  # German IBAN with optional spaces
     "PHONE": r"(?:\+49|0)(?:\s*\d+){1,4}[-/\s]*\d{3,}", # Loose German Phone (DIN 5008ish)
     "EMAIL": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-    "DATE_YEAR": r"\b(19|20)\d{2}\b" # Catches years 1900-2099 (Optional: decide if you want to scrub these)
+    "DATE_YEAR": r"\b(19|20)\d{2}\b", # Catches years 1900-2099 (Optional: decide if you want to scrub these)
+    "STREET": r"\b[A-ZÄÖÜ][a-zäöüß]*(?:straße|strasse|str\.|weg|platz|allee|gasse|ring|damm|ufer)\s*\d+[a-zA-Z]?\b",  # German street addresses
 }
 
 class GermanPIIScrubber:
@@ -27,8 +28,8 @@ class GermanPIIScrubber:
         self.deny_list_common: Set[str] = set() # Words that are names but also common verbs/nouns (e.g., "Essen")
         
         # Safe words to exclude from scrubbing even if they are in lists
-        # "Essen" -> City but also "to eat". "Halle" -> City but also "hall".
-        self.safe_words = {"Essen", "Halle", "Leder", "Mitte", "Berg", "See", "Hof"}
+        # Loaded from safe_words.txt - words that are place/person names but also common German words
+        self.safe_words: Set[str] = set()
 
         # Load data from local files
         self._load_data()
@@ -36,6 +37,19 @@ class GermanPIIScrubber:
     def _load_data(self):
         """Loads data from local files in data directory."""
         print(f"Loading PII data from {self.data_dir}...")
+        
+        # 0. Load safe words first (must be loaded before names/cities)
+        safe_words_file = os.path.join(self.data_dir, "safe_words.txt")
+        if os.path.exists(safe_words_file):
+            with open(safe_words_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip empty lines and comments
+                    if line and not line.startswith('#'):
+                        self.safe_words.add(line)
+            print(f"Loaded {len(self.safe_words)} safe words.")
+        else:
+            print(f"Warning: {safe_words_file} not found, using empty safe words list")
         
         # 1. Load names from namen.txt
         names_file = os.path.join(self.data_dir, "namen.txt")

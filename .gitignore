@@ -41,6 +41,7 @@ mobile_assets/
 !requirements.txt
 !data/namen.txt
 !data/orte.txt
+!data/safe_words.txt
 
 # Streamlit
 .streamlit/
