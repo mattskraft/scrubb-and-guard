@@ -22,13 +22,16 @@ A lightweight, on-device PII (Personally Identifiable Information) scrubbing too
 
 ```
 scrubb-and-guard/
-├── pii_scrubber.py          # Core scrubbing module
+├── scrubb_guard/            # Main package
+│   ├── __init__.py          # Package exports
+│   └── pii_scrubber.py      # Core scrubbing module
 ├── apps/
-│   └── app_pii-scrubber.py  # Streamlit demo app
+│   └── app-pii-scrubber.py  # Streamlit demo app
 ├── data/
 │   ├── namen.txt            # German surnames
 │   └── orte.txt             # German cities
 ├── requirements.txt         # Python dependencies
+├── pyproject.toml           # Package configuration
 └── README.md               # This file
 ```
 
@@ -40,12 +43,17 @@ scrubb-and-guard/
 pip install -r requirements.txt
 ```
 
+3. (Optional) Install the package in development mode:
+```bash
+pip install -e .
+```
+
 ## Usage
 
-### Command Line
+### As a Library
 
 ```python
-from pii_scrubber import GermanPIIScrubber
+from scrubb_guard import GermanPIIScrubber
 
 scrubber = GermanPIIScrubber()
 text = "Ich heiße Thomas Müller, wohne in Berlin und meine KV-Nummer ist A123456789."
@@ -54,11 +62,18 @@ print(cleaned)
 # Output: Ich heiße [PERSON] [PERSON], wohne in [LOCATION] und meine KV-Nummer ist [MEDICAL_ID].
 ```
 
+### Command Line
+
+You can also run the module directly:
+```bash
+python -m scrubb_guard.pii_scrubber
+```
+
 ### Streamlit App
 
 Run the demo app:
 ```bash
-streamlit run apps/app_pii-scrubber.py
+streamlit run apps/app-pii-scrubber.py
 ```
 
 ### Export for Mobile
@@ -81,11 +96,11 @@ This creates:
 
 ## Data Sources
 
-The tool automatically downloads German name and location data from:
-- GitHub repositories with German name datasets
-- German postal code databases
+The tool uses local data files in the `data/` directory:
+- `data/namen.txt` - German surnames
+- `data/orte.txt` - German cities
 
-Data is cached locally in `pii_data/` directory after first download.
+These files are loaded at initialization time.
 
 ## License
 
