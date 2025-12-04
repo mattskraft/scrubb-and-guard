@@ -36,6 +36,7 @@ ENV/
 # Project specific
 pii_data/
 mobile_assets/
+models/
 *.csv
 *.txt
 !requirements.txt
