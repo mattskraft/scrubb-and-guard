@@ -8,16 +8,18 @@ Usage:
     python train_safety_model.py train      # Fine-tune the model
     python train_safety_model.py export     # Export to ONNX
     python train_safety_model.py quantize   # Quantize ONNX model
+    python train_safety_model.py evaluate   # Compare original vs quantized
     python train_safety_model.py all        # Run full pipeline
 """
 
 import argparse
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Union
 
 import numpy as np
 import pandas as pd
+import torch
 from datasets import Dataset
 from transformers import (
     AutoTokenizer,
@@ -71,6 +73,16 @@ def compute_metrics(eval_pred) -> Dict[str, float]:
     }
 
 
+def preprocess_logits_for_metrics(
+    logits: Union[torch.Tensor, tuple], labels: torch.Tensor
+) -> torch.Tensor:
+    """Extract only the classification logits, ignore any other model outputs."""
+    # If logits is a tuple (e.g., (logits, hidden_states)), take just the first element
+    if isinstance(logits, tuple):
+        logits = logits[0]
+    return logits
+
+
 def load_and_prepare_data(tokenizer: PreTrainedTokenizer) -> tuple[Dataset, Dataset, Any]:
     """Load CSV data, tokenize, and prepare for training."""
     logger.info(f"Loading data from {DATA_FILE}")
@@ -97,6 +109,12 @@ def load_and_prepare_data(tokenizer: PreTrainedTokenizer) -> tuple[Dataset, Data
         return tokenizer(examples["text"], truncation=True, max_length=128)
     
     tokenized_datasets = dataset.map(preprocess_function, batched=True)
+    
+    # Remove columns not needed for training (keep only input_ids, attention_mask, label)
+    columns_to_remove = [col for col in tokenized_datasets["train"].column_names 
+                         if col not in ["input_ids", "attention_mask", "label"]]
+    tokenized_datasets = tokenized_datasets.remove_columns(columns_to_remove)
+    
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     
     return tokenized_datasets["train"], tokenized_datasets["test"], data_collator
@@ -148,9 +166,10 @@ def train_model() -> Path:
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
+        preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
     )
     
@@ -230,6 +249,104 @@ def quantize_model(onnx_path: Path | None = None) -> Path:
     return quantized_model_path
 
 
+def evaluate_quantization() -> None:
+    """Compare original vs quantized model performance on the test split."""
+    logger.info("Evaluating quantization impact...")
+    
+    # Check paths
+    model_path = OUTPUT_DIR / "best_model"
+    quantized_model_path = ONNX_DIR / "model_quantized.onnx"
+    
+    if not model_path.exists():
+        raise FileNotFoundError(f"Original model not found at {model_path}")
+    if not quantized_model_path.exists():
+        raise FileNotFoundError(f"Quantized model not found at {quantized_model_path}")
+    
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(str(model_path))
+    
+    # Reconstruct the SAME test split (seed=42)
+    df = pd.read_csv(DATA_FILE)
+    df["label"] = df["label"].map(LABEL_MAP)
+    dataset = Dataset.from_pandas(df)
+    dataset = dataset.train_test_split(test_size=0.2, seed=42)
+    test_data = dataset["test"]
+    
+    logger.info(f"Test set size: {len(test_data)} samples")
+    
+    # Prepare test texts and labels
+    texts = test_data["text"]
+    labels = np.array(test_data["label"])
+    
+    def get_predictions(model, is_onnx: bool = False) -> np.ndarray:
+        """Run inference and return predicted class indices."""
+        predictions = []
+        for text in texts:
+            inputs = tokenizer(
+                text, 
+                return_tensors="np" if is_onnx else "pt",
+                truncation=True, 
+                max_length=128
+            )
+            outputs = model(**inputs)
+            logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+            if is_onnx:
+                pred = np.argmax(logits, axis=1)[0]
+            else:
+                pred = torch.argmax(logits, dim=1).item()
+            predictions.append(pred)
+        return np.array(predictions)
+    
+    def calc_metrics(preds: np.ndarray, labels: np.ndarray) -> Dict[str, float]:
+        """Calculate metrics from predictions."""
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            labels, preds, average="binary", pos_label=1
+        )
+        accuracy = accuracy_score(labels, preds)
+        return {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+        }
+    
+    # Evaluate original PyTorch model
+    logger.info("Evaluating original PyTorch model...")
+    original_model = AutoModelForSequenceClassification.from_pretrained(str(model_path))
+    original_model.eval()
+    with torch.no_grad():
+        original_preds = get_predictions(original_model, is_onnx=False)
+    original_metrics = calc_metrics(original_preds, labels)
+    
+    # Evaluate quantized ONNX model
+    logger.info("Evaluating quantized ONNX model...")
+    quantized_model = ORTModelForSequenceClassification.from_pretrained(
+        str(ONNX_DIR), file_name="model_quantized.onnx"
+    )
+    quantized_preds = get_predictions(quantized_model, is_onnx=True)
+    quantized_metrics = calc_metrics(quantized_preds, labels)
+    
+    # Compare results
+    logger.info("\n" + "=" * 60)
+    logger.info("QUANTIZATION IMPACT COMPARISON")
+    logger.info("=" * 60)
+    logger.info(f"{'Metric':<12} {'Original':<12} {'Quantized':<12} {'Delta':<12}")
+    logger.info("-" * 60)
+    
+    for metric in ["accuracy", "precision", "recall", "f1"]:
+        orig = original_metrics[metric]
+        quant = quantized_metrics[metric]
+        delta = quant - orig
+        delta_str = f"{delta:+.4f}" if delta != 0 else "0.0000"
+        logger.info(f"{metric:<12} {orig:<12.4f} {quant:<12.4f} {delta_str:<12}")
+    
+    logger.info("=" * 60)
+    
+    # Check prediction agreement
+    agreement = np.mean(original_preds == quantized_preds) * 100
+    logger.info(f"Prediction agreement: {agreement:.1f}%")
+
+
 def run_full_pipeline() -> None:
     """Run the complete pipeline: train, export, and quantize."""
     logger.info("Running full pipeline...")
@@ -250,7 +367,7 @@ def main() -> None:
     )
     parser.add_argument(
         "command",
-        choices=["train", "export", "quantize", "all"],
+        choices=["train", "export", "quantize", "evaluate", "all"],
         default="all",
         nargs="?",
         help="Pipeline stage to run (default: all)",
@@ -264,6 +381,8 @@ def main() -> None:
         export_to_onnx()
     elif args.command == "quantize":
         quantize_model()
+    elif args.command == "evaluate":
+        evaluate_quantization()
     else:  # "all" or default
         run_full_pipeline()
 
