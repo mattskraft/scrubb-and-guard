@@ -5,12 +5,13 @@ Train a German TinyBERT model for safety classification (SAFE vs UNSAFE).
 Supports training, ONNX export, and quantization as separate stages.
 
 Usage:
-    python train_safety_model.py train                    # Fine-tune with default data
-    python train_safety_model.py train -d path/to/data.csv  # Use custom dataset
-    python train_safety_model.py export                   # Export to ONNX
-    python train_safety_model.py quantize                 # Quantize ONNX model
-    python train_safety_model.py evaluate                 # Compare original vs quantized
-    python train_safety_model.py all                      # Run full pipeline
+    python train_safety_model.py train --model-id v1 --data data/synthetic/dataset.csv
+    python train_safety_model.py export --model-id v1
+    python train_safety_model.py quantize --model-id v1
+    python train_safety_model.py evaluate --model-id v1 --data data/synthetic/dataset.csv
+    python train_safety_model.py all --model-id v1 --data data/synthetic/dataset.csv
+
+All outputs are saved to: models/{model_id}/
 """
 
 import argparse
@@ -36,15 +37,16 @@ from optimum.onnxruntime.configuration import AutoQuantizationConfig
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 # --- CONFIGURATION ---
-MODEL_ID = "dvm1983/TinyBERT_General_4L_312D_de"  # Pre-trained German TinyBERT
+BASE_MODEL = "dvm1983/TinyBERT_General_4L_312D_de"  # Pre-trained German TinyBERT
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DEFAULT_DATA_FILE = PROJECT_ROOT / "data" / "synthetic" / "german_safety_dataset.csv"
-OUTPUT_DIR = PROJECT_ROOT / "models" / "safety_classifier"
-ONNX_DIR = PROJECT_ROOT / "models" / "safety_classifier_onnx"
+MODELS_DIR = PROJECT_ROOT / "models"
 
-# Global variable set by CLI
-DATA_FILE: Path = DEFAULT_DATA_FILE
+# Global variables set by CLI
+DATA_FILE: Path = None  # type: ignore
+MODEL_ID: str = None    # type: ignore
+OUTPUT_DIR: Path = None # type: ignore
+ONNX_DIR: Path = None   # type: ignore
 
 LABEL_MAP = {"SAFE": 0, "UNSAFE": 1}
 ID2LABEL = {0: "SAFE", 1: "UNSAFE"}
@@ -126,13 +128,14 @@ def load_and_prepare_data(tokenizer: PreTrainedTokenizer) -> tuple[Dataset, Data
 
 def train_model() -> Path:
     """Fine-tune the German TinyBERT model for safety classification."""
-    logger.info(f"Starting training with model: {MODEL_ID}")
+    logger.info(f"Starting training with base model: {BASE_MODEL}")
+    logger.info(f"Output directory: {OUTPUT_DIR}")
     
     # Ensure output directory exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     
     # Load and prepare data
     train_dataset, eval_dataset, data_collator = load_and_prepare_data(tokenizer)
@@ -140,7 +143,7 @@ def train_model() -> Path:
     # Load model
     logger.info("Loading model for fine-tuning...")
     model = AutoModelForSequenceClassification.from_pretrained(
-        MODEL_ID,
+        BASE_MODEL,
         num_labels=2,
         id2label=ID2LABEL,
         label2id=LABEL2ID,
@@ -203,7 +206,7 @@ def export_to_onnx(model_path: Path | None = None) -> Path:
     if not model_path.exists():
         raise FileNotFoundError(
             f"Model not found at {model_path}. "
-            "Please run training first: python train_safety_model.py train"
+            f"Please run training first: python train_safety_model.py train -m {MODEL_ID} -d <data.csv>"
         )
     
     logger.info(f"Exporting model from {model_path} to ONNX...")
@@ -234,7 +237,7 @@ def quantize_model(onnx_path: Path | None = None) -> Path:
     if not onnx_path.exists():
         raise FileNotFoundError(
             f"ONNX model not found at {onnx_path}. "
-            "Please run export first: python train_safety_model.py export"
+            f"Please run export first: python train_safety_model.py export -m {MODEL_ID}"
         )
     
     logger.info(f"Quantizing model at {onnx_path}...")
@@ -364,7 +367,7 @@ def run_full_pipeline() -> None:
 
 def main() -> None:
     """Main entry point with CLI argument parsing."""
-    global DATA_FILE
+    global DATA_FILE, MODEL_ID, OUTPUT_DIR, ONNX_DIR
     
     parser = argparse.ArgumentParser(
         description="Train, export, and quantize a safety classification model.",
@@ -374,21 +377,37 @@ def main() -> None:
     parser.add_argument(
         "command",
         choices=["train", "export", "quantize", "evaluate", "all"],
-        default="all",
-        nargs="?",
-        help="Pipeline stage to run (default: all)",
+        help="Pipeline stage to run",
+    )
+    parser.add_argument(
+        "--model-id", "-m",
+        type=str,
+        required=True,
+        help="Model identifier (outputs saved to models/{model_id}/)",
     )
     parser.add_argument(
         "--data", "-d",
         type=Path,
-        default=DEFAULT_DATA_FILE,
-        help=f"Path to training data CSV (default: {DEFAULT_DATA_FILE.name})",
+        help="Path to training data CSV (required for train/evaluate/all)",
     )
     
     args = parser.parse_args()
     
-    # Set global data file path
-    DATA_FILE = args.data
+    # Set global model ID and paths
+    MODEL_ID = args.model_id
+    OUTPUT_DIR = MODELS_DIR / MODEL_ID / "pytorch"
+    ONNX_DIR = MODELS_DIR / MODEL_ID / "onnx"
+    
+    # Validate data argument for commands that need it
+    if args.command in ["train", "evaluate", "all"]:
+        if args.data is None:
+            parser.error(f"--data is required for '{args.command}' command")
+        DATA_FILE = args.data
+        if not DATA_FILE.exists():
+            parser.error(f"Data file not found: {DATA_FILE}")
+    
+    logger.info(f"Model ID: {MODEL_ID}")
+    logger.info(f"Output dir: {OUTPUT_DIR}")
     
     if args.command == "train":
         train_model()
@@ -398,7 +417,7 @@ def main() -> None:
         quantize_model()
     elif args.command == "evaluate":
         evaluate_quantization()
-    else:  # "all" or default
+    elif args.command == "all":
         run_full_pipeline()
 
 
