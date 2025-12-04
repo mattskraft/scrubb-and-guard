@@ -13,30 +13,61 @@ st.set_page_config(page_title="Scrubb & Guard", layout="centered")
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent
-MODEL_DIR = PROJECT_ROOT / "models" / "safety_classifier_onnx"
+MODELS_DIR = PROJECT_ROOT / "models"
+
+
+def get_available_models() -> list[str]:
+    """Scan models directory for available trained models."""
+    models = []
+    if MODELS_DIR.exists():
+        for model_dir in MODELS_DIR.iterdir():
+            if model_dir.is_dir():
+                onnx_path = model_dir / "onnx" / "model_quantized.onnx"
+                if onnx_path.exists():
+                    models.append(model_dir.name)
+    return sorted(models)
+
 
 # Initialize Scrubber (Cached)
 @st.cache_resource
 def get_scrubber():
     return GermanPIIScrubber()
 
-# Initialize Safety Classifier (Cached)
+
+# Initialize Safety Classifier (Cached per model)
 @st.cache_resource
-def get_classifier():
+def get_classifier(model_id: str):
     from transformers import AutoTokenizer
     from optimum.onnxruntime import ORTModelForSequenceClassification
     
-    tokenizer = AutoTokenizer.from_pretrained(str(MODEL_DIR))
+    model_dir = MODELS_DIR / model_id / "onnx"
+    tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
     model = ORTModelForSequenceClassification.from_pretrained(
-        str(MODEL_DIR), file_name="model_quantized.onnx"
+        str(model_dir), file_name="model_quantized.onnx"
     )
     return tokenizer, model
+
 
 scrubber = get_scrubber()
 
 # Header
 st.title("🛡️ Scrubb & Guard")
 st.markdown("**PII Scrubbing** and **Safety Classification** for German text")
+
+st.divider()
+
+# Model Selection
+available_models = get_available_models()
+
+if not available_models:
+    st.warning("No trained models found in `models/`. Train a model first with `train_safety_model.py`.")
+    selected_model = None
+else:
+    selected_model = st.selectbox(
+        "Select Safety Model",
+        options=available_models,
+        help="Choose which trained model to use for safety classification"
+    )
 
 st.divider()
 
@@ -56,7 +87,12 @@ with col1:
     scrubb_clicked = st.button("🧹 Scrubb", use_container_width=True, type="primary")
 
 with col2:
-    guard_clicked = st.button("🛡️ Guard", use_container_width=True, type="secondary")
+    guard_clicked = st.button(
+        "🛡️ Guard", 
+        use_container_width=True, 
+        type="secondary",
+        disabled=(selected_model is None)
+    )
 
 st.divider()
 
@@ -77,11 +113,11 @@ if scrubb_clicked and user_text:
         st.write(f"**Cities in deny list:** {len(scrubber.deny_list_cities):,}")
         st.write(f"**Safe words:** {len(scrubber.safe_words):,}")
 
-elif guard_clicked and user_text:
+elif guard_clicked and user_text and selected_model:
     st.subheader("Safety Classification")
     
     with st.spinner("Classifying..."):
-        tokenizer, model = get_classifier()
+        tokenizer, model = get_classifier(selected_model)
         
         # Run inference
         inputs = tokenizer(user_text, return_tensors="np", truncation=True, max_length=128)
@@ -112,8 +148,9 @@ elif guard_clicked and user_text:
     
     # Model info
     with st.expander("Model Info"):
-        st.write(f"**Model:** Quantized ONNX (TinyBERT)")
-        st.write(f"**Path:** `{MODEL_DIR}`")
+        st.write(f"**Model ID:** `{selected_model}`")
+        st.write(f"**Type:** Quantized ONNX (TinyBERT)")
+        st.write(f"**Path:** `{MODELS_DIR / selected_model / 'onnx'}`")
         st.write(f"**Max length:** 128 tokens")
 
 elif (scrubb_clicked or guard_clicked) and not user_text:
