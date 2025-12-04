@@ -20,7 +20,7 @@ class GermanPIIScrubber:
         if data_dir is None:
             # Get the directory where this package is located
             package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            data_dir = os.path.join(package_dir, "data")
+            data_dir = os.path.join(package_dir, "data", "named_entities")
         
         self.data_dir = data_dir
         self.deny_list_names: Set[str] = set()

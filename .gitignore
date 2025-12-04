@@ -39,9 +39,13 @@ mobile_assets/
 *.csv
 *.txt
 !requirements.txt
-!data/namen.txt
-!data/orte.txt
-!data/safe_words.txt
+!data/named_entities/namen.txt
+!data/named_entities/orte.txt
+!data/named_entities/safe_words.txt
+
+# Secrets
+.env
+config/.env
 
 # Streamlit
 .streamlit/
