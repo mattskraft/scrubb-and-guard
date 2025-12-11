@@ -12,7 +12,10 @@ import time
 
 # Add parent directory to path to import scrubb_guard package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scrubb_guard.zero_shot_classifier import ZeroShotClassifier, DEFAULT_LABELS
+from scrubb_guard.zero_shot_classifier import (
+    ZeroShotClassifier, DEFAULT_LABELS, DEFAULT_LABELS_EN,
+    DEFAULT_LABEL_MAP, DEFAULT_TEMPLATE_EN, DEFAULT_TEMPLATE_DE
+)
 
 # Page Config
 st.set_page_config(
@@ -128,23 +131,31 @@ def render_score_bar(label: str, score: float, rank: int):
 st.markdown('<p class="main-title">🎯 Zero-Shot Classifier</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Multilingual text classification without training</p>', unsafe_allow_html=True)
 
-# Initialize session state for labels
+# Initialize session state for labels and settings
 if "labels" not in st.session_state:
-    st.session_state.labels = list(DEFAULT_LABELS)
+    st.session_state.labels = list(DEFAULT_LABELS_EN)  # Start with English for best results
+if "use_english" not in st.session_state:
+    st.session_state.use_english = True
+if "label_map" not in st.session_state:
+    st.session_state.label_map = dict(DEFAULT_LABEL_MAP)
 
 # Sidebar for label management
 with st.sidebar:
     st.header("📝 Classification Labels")
     st.caption("Define the categories for classification")
     
-    # Show current labels
+    # Show current labels with display names
     st.markdown("**Active Labels:**")
     
     labels_to_remove = []
     for i, label in enumerate(st.session_state.labels):
         col1, col2 = st.columns([4, 1])
+        display_name = st.session_state.label_map.get(label, label)
         with col1:
-            st.markdown(f"`{label}`")
+            if display_name != label:
+                st.markdown(f"`{label}` → {display_name}")
+            else:
+                st.markdown(f"`{label}`")
         with col2:
             if st.button("×", key=f"remove_{i}", help=f"Remove {label}"):
                 labels_to_remove.append(label)
@@ -159,7 +170,7 @@ with st.sidebar:
     # Add new label
     new_label = st.text_input(
         "Add new label:",
-        placeholder="Enter label name...",
+        placeholder="e.g., suicide, anxiety, safe...",
         key="new_label_input"
     )
     
@@ -178,40 +189,52 @@ with st.sidebar:
     
     # Reset to defaults
     if st.button("🔄 Reset to Defaults", use_container_width=True):
-        st.session_state.labels = list(DEFAULT_LABELS)
+        st.session_state.labels = list(DEFAULT_LABELS_EN)
+        st.session_state.use_english = True
         st.rerun()
     
-    # Quick presets
+    # Quick presets (English labels for better accuracy)
     st.divider()
-    st.markdown("**Quick Presets:**")
+    st.markdown("**Quick Presets** *(English labels)*:")
     
     if st.button("🏥 Mental Health", use_container_width=True):
-        st.session_state.labels = [
-            "Suizidalität", "Selbstverletzung", "Depressive Stimmung", 
-            "Angst", "Neutral"
-        ]
+        st.session_state.labels = ["suicide", "self-harm", "depression", "anxiety", "neutral"]
+        st.session_state.use_english = True
         st.rerun()
     
     if st.button("💬 Sentiment", use_container_width=True):
-        st.session_state.labels = ["Positiv", "Negativ", "Neutral"]
+        st.session_state.labels = ["positive", "negative", "neutral"]
+        st.session_state.use_english = True
         st.rerun()
     
     if st.button("⚠️ Content Safety", use_container_width=True):
-        st.session_state.labels = [
-            "Sicher", "Hassrede", "Beleidigung", 
-            "Gewaltandrohung", "Sexueller Inhalt"
-        ]
+        st.session_state.labels = ["safe", "hate speech", "insult", "violence", "sexual content"]
+        st.session_state.use_english = True
         st.rerun()
 
 # Main content area
 st.divider()
 
-# Multi-label toggle
-multi_label = st.toggle(
-    "Multi-Label Mode",
-    value=True,
-    help="When enabled, each label is scored independently. When disabled, scores sum to 100%."
-)
+# Settings row
+settings_col1, settings_col2 = st.columns(2)
+
+with settings_col1:
+    multi_label = st.toggle(
+        "Multi-Label Mode",
+        value=False,  # Single-label often works better
+        help="When enabled, each label is scored independently. When disabled, scores sum to 100%."
+    )
+
+with settings_col2:
+    use_english_template = st.toggle(
+        "🚀 English Template",
+        value=True,
+        help="Use English hypothesis template for better accuracy (recommended even for German text)"
+    )
+
+# Show template being used
+hypothesis_template = DEFAULT_TEMPLATE_EN if use_english_template else DEFAULT_TEMPLATE_DE
+st.caption(f"Template: *\"{hypothesis_template}\"*")
 
 # Text input
 user_text = st.text_area(
@@ -221,10 +244,11 @@ user_text = st.text_area(
     key="input_text"
 )
 
-# Show current labels as chips
+# Show current labels as chips (with display names)
 if st.session_state.labels:
     st.markdown("**Classifying against:**")
-    labels_html = " ".join([f'<span class="label-chip">{label}</span>' for label in st.session_state.labels])
+    display_labels = [st.session_state.label_map.get(l, l) for l in st.session_state.labels]
+    labels_html = " ".join([f'<span class="label-chip">{label}</span>' for label in display_labels])
     st.markdown(f'<div>{labels_html}</div>', unsafe_allow_html=True)
 else:
     st.warning("Please add at least one label in the sidebar")
@@ -239,7 +263,9 @@ if user_text and st.session_state.labels:
         result = classifier.classify(
             user_text, 
             labels=st.session_state.labels,
-            multi_label=multi_label
+            multi_label=multi_label,
+            hypothesis_template=hypothesis_template,
+            label_mapping=st.session_state.label_map
         )
         elapsed_time = time.perf_counter() - start_time
     
@@ -270,18 +296,22 @@ if user_text and st.session_state.labels:
     
     st.divider()
     
-    # All scores
+    # All scores (using display labels)
     st.markdown("**All Scores (ranked):**")
     
-    for rank, (label, score) in enumerate(zip(result.labels, result.scores)):
+    display_labels = result.get_labels_for_display()
+    for rank, (label, score) in enumerate(zip(display_labels, result.scores)):
         render_score_bar(label, score, rank)
     
     # Details expander
     with st.expander("📋 Raw Output"):
         st.json(result.to_dict())
         
-    # Warning for concerning content
-    concerning_labels = {"Suizidalität", "Selbstverletzung", "Gewaltandrohung"}
+    # Warning for concerning content (check both English and German labels)
+    concerning_labels = {
+        "Suizidalität", "Selbstverletzung", "Gewaltandrohung",
+        "suicide", "self-harm", "violence"
+    }
     detected_concerning = [
         (label, score) 
         for label, score in zip(result.labels, result.scores) 
