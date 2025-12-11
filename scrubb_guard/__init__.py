@@ -6,7 +6,8 @@ for German text. Designed for mobile deployment with regex patterns and deny lis
 """
 
 from scrubb_guard.pii_scrubber import GermanPIIScrubber, REGEX_PATTERNS
+from scrubb_guard.zero_shot_classifier import ZeroShotClassifier, DEFAULT_LABELS
 
-__all__ = ["GermanPIIScrubber", "REGEX_PATTERNS"]
+__all__ = ["GermanPIIScrubber", "REGEX_PATTERNS", "ZeroShotClassifier", "DEFAULT_LABELS"]
 __version__ = "0.1.0"
 

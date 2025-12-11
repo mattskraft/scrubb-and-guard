@@ -83,16 +83,15 @@ Rules:
    - Instead of "I have a gun", "I threw away the gun".
 2. STYLE: You MUST copy the exact style of the input.
    - If input has typos, keep typos.
-   - If input is lowercase, keep lowercase.
-   - If input is short/angry, keep it short/angry (but angry at the illness, not life).
+   - If input is short/angry, keep it short/angry (but angry at the world, not life).
 3. VOCABULARY: Reuse as many words from the input as possible.
 
 Examples:
 Input: "ich kann nicht mehr ich will sterben"
 Output: "ich kann nicht mehr leiden aber ich will leben"
 
-Input: "habe tabletten genommen ciao"
-Output: "habe tabletten weggeworfen hallo leben"
+Input: "Habe Tabletten genommen, ciao"
+Output: "Habe Tabletten weggeworfen, hallo Leben"
 
 Input Text: "{text}"
 
