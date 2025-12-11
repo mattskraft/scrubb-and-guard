@@ -8,6 +8,7 @@ using multilingual DeBERTa model.
 import streamlit as st
 import sys
 import os
+import time
 
 # Add parent directory to path to import scrubb_guard package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -234,17 +235,19 @@ if user_text and st.session_state.labels:
     
     with st.spinner("Classifying..."):
         classifier = get_classifier()
+        start_time = time.perf_counter()
         result = classifier.classify(
             user_text, 
             labels=st.session_state.labels,
             multi_label=multi_label
         )
+        elapsed_time = time.perf_counter() - start_time
     
     # Results header
     st.subheader("📊 Classification Results")
     
     # Top prediction highlight
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.metric(
             label="Top Prediction",
@@ -257,6 +260,12 @@ if user_text and st.session_state.labels:
             label="Mode",
             value=mode,
             delta=f"{len(st.session_state.labels)} labels"
+        )
+    with col3:
+        st.metric(
+            label="Inference Time",
+            value=f"{elapsed_time:.2f}s",
+            delta=f"{elapsed_time*1000:.0f} ms"
         )
     
     st.divider()
