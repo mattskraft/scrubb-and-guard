@@ -1,7 +1,10 @@
 import logging
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Dict, Optional
+
+import spacy
 
 # Presidio Imports
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, RecognizerResult, Pattern
@@ -13,6 +16,24 @@ from presidio_anonymizer.entities import OperatorConfig
 #logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("PII_Pipeline")
+
+# SpaCy model name
+SPACY_MODEL = "de_core_news_lg"
+
+
+def ensure_spacy_model(model_name: str = SPACY_MODEL) -> None:
+    """Download SpaCy model if not already installed."""
+    try:
+        spacy.load(model_name)
+        logger.info(f"SpaCy model '{model_name}' is available")
+    except OSError:
+        logger.info(f"Downloading SpaCy model '{model_name}'...")
+        subprocess.run(
+            [sys.executable, "-m", "spacy", "download", model_name],
+            check=True,
+            capture_output=True
+        )
+        logger.info(f"SpaCy model '{model_name}' downloaded successfully")
 
 # Path to deny list config file
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -61,11 +82,14 @@ class PiiPipeline:
         # Load deny list from file or use provided list
         self.deny_list = deny_list if deny_list is not None else load_deny_list()
         
+        # Ensure SpaCy model is downloaded (important for Streamlit Cloud)
+        ensure_spacy_model(SPACY_MODEL)
+        
         # 1. SpaCy German Model Configuration
         # Wir zwingen Presidio, das 'de_core_news_lg' Modell zu nutzen.
         nlp_configuration = {
             "nlp_engine_name": "spacy",
-            "models": [{"lang_code": "de", "model_name": "de_core_news_lg"}],
+            "models": [{"lang_code": "de", "model_name": SPACY_MODEL}],
         }
         provider = NlpEngineProvider(nlp_configuration=nlp_configuration)
         self.nlp_engine = provider.create_engine()
