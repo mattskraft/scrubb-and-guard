@@ -87,6 +87,55 @@ st.set_page_config(
     layout="centered"
 )
 
+
+# --- Password Protection ---
+def check_password() -> bool:
+    """Returns True if the user has entered the correct password."""
+    
+    def password_entered():
+        """Check if entered password matches."""
+        if st.session_state.get("password") == st.secrets.get("APP_PASSWORD"):
+            st.session_state["authenticated"] = True
+            del st.session_state["password"]  # Don't store password
+        else:
+            st.session_state["authenticated"] = False
+    
+    # Check if password protection is enabled
+    if not st.secrets.get("APP_PASSWORD"):
+        return True  # No password set, allow access
+    
+    # Already authenticated
+    if st.session_state.get("authenticated"):
+        return True
+    
+    # Show login form
+    st.markdown("""
+    <div style="text-align: center; padding: 2rem;">
+        <h1>🔒 PII Anonymizer</h1>
+        <p style="color: #888;">Please enter the password to access this app.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.text_input(
+            "Password",
+            type="password",
+            on_change=password_entered,
+            key="password",
+            placeholder="Enter password..."
+        )
+        
+        if st.session_state.get("authenticated") is False:
+            st.error("❌ Incorrect password")
+    
+    return False
+
+
+# Check authentication before showing app
+if not check_password():
+    st.stop()
+
 # Custom CSS for a distinctive look
 st.markdown("""
 <style>
