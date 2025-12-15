@@ -303,13 +303,11 @@ st.divider()
 
 # Example texts for quick testing
 EXAMPLE_TEXTS = [
-    "Ich heiße Peter Müller und wohne in 12345 Berlin.",
-    "Ruf mich an unter 0176-12345678 oder mail mir: peter@example.com",
+    "Ich heiße Peter Müller und wohne in 12345 Berlin. Ruf mich an unter 0176-12345678 oder mail mir: peter@example.com",
     "Ich komme aus Oer-Erkenschwick.",
     "Wir treffen uns in Essen zum Essen.",
     "Mein Arzt ist Dr. Müller in der Klinik am See.",
-    "Kiso Mind ist eine Drecksapp.",
-    "Den Anzaldo Brüdern kann man nicht trauen."
+    "Kiso Mind ist eine Drecksapp. Den Anzaldo Brüdern ist nicht zu trauen."
 ]
 
 # Initialize session state for form input
