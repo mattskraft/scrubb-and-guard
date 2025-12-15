@@ -47,28 +47,6 @@ st.markdown("""
         margin-bottom: 2rem;
     }
     
-    .stat-card {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 12px;
-        padding: 1rem;
-        text-align: center;
-    }
-    
-    .stat-number {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 2rem;
-        font-weight: 600;
-        color: #00d4ff;
-    }
-    
-    .stat-label {
-        font-family: 'Outfit', sans-serif;
-        color: #888;
-        font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
     
     .entity-tag {
         display: inline-block;
@@ -233,40 +211,13 @@ if process_btn and user_text:
     with st.spinner("Analyzing..."):
         result = pipeline.process(user_text)
     
-    # Stats row
-    st.markdown("##### Results")
-    
-    stat_cols = st.columns(3)
-    with stat_cols[0]:
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{result['original_length']}</div>
-            <div class="stat-label">Characters</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with stat_cols[1]:
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{result['items_changed']}</div>
-            <div class="stat-label">PIIs Found</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with stat_cols[2]:
-        # Calculate "safety score" (just visual, higher = more clean)
-        if result['original_length'] > 0:
-            safety = max(0, 100 - (result['items_changed'] * 10))
-        else:
-            safety = 100
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{safety}%</div>
-            <div class="stat-label">Privacy Score</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
+    # Compact stats line
+    st.markdown(
+        f'<p style="color: #888; font-size: 0.9rem; margin-bottom: 1rem;">'
+        f'<strong>{result["original_length"]}</strong> characters · '
+        f'<strong style="color: #00d4ff;">{result["items_changed"]}</strong> PIIs found</p>',
+        unsafe_allow_html=True
+    )
     
     # Side by side comparison
     col_orig, col_anon = st.columns(2)
