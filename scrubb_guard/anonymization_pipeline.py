@@ -98,7 +98,22 @@ class PiiPipeline:
         )
         self.analyzer.registry.add_recognizer(plz_recognizer)
 
-        # B. Interne Deny-List (Kontext-Blacklist)
+        # B. German titles followed by names (Dr., Prof., Herr, Frau, etc.)
+        # Catches names that SpaCy NER might miss
+        title_patterns = [
+            # Dr./Prof. + Name (e.g., "Dr. Müller", "Prof. Schmidt")
+            Pattern(name="dr_title", regex=r"\b(?:Dr\.|Prof\.)\s+[A-ZÄÖÜ][a-zäöüß]+", score=0.9),
+            # Herr/Frau + Name (e.g., "Herr Meier", "Frau Weber")
+            Pattern(name="herr_frau", regex=r"\b(?:Herr|Frau)\s+[A-ZÄÖÜ][a-zäöüß]+", score=0.85),
+        ]
+        title_recognizer = PatternRecognizer(
+            supported_entity="PERSON",
+            supported_language="de",
+            patterns=title_patterns
+        )
+        self.analyzer.registry.add_recognizer(title_recognizer)
+
+        # C. Interne Deny-List (Kontext-Blacklist)
         # Erkennt spezifische interne Namen, egal was der Kontext sagt.
         self._update_deny_list_recognizer()
 
