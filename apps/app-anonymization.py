@@ -200,12 +200,13 @@ with st.form(key="anonymize_form"):
         process_btn = st.form_submit_button("🚀 Anonymize", type="primary", use_container_width=True)
 
 # Process when form submitted (button click or Ctrl+Enter)
-if process_btn and st.session_state.form_input:
+# Use user_text (return value) which has current value, not session_state which updates after
+if process_btn and user_text:
     st.divider()
     
     # Run the pipeline
     with st.spinner("Analyzing..."):
-        result = pipeline.process(st.session_state.form_input)
+        result = pipeline.process(user_text)
     
     # Compact stats line
     st.markdown(
@@ -222,7 +223,7 @@ if process_btn and st.session_state.form_input:
         st.markdown("**Original Text**")
         st.text_area(
             "Original:",
-            value=st.session_state.form_input,
+            value=user_text,
             height=150,
             disabled=True,
             label_visibility="collapsed"
@@ -268,7 +269,7 @@ if process_btn and st.session_state.form_input:
                     unsafe_allow_html=True
                 )
 
-elif process_btn and not st.session_state.form_input:
+elif process_btn and not user_text:
     st.warning("Please enter some text to anonymize.")
 
 # Footer
