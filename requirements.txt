@@ -8,8 +8,9 @@ presidio-anonymizer>=2.2.0
 spacy>=3.7.0
 
 # SpaCy German model (pip-installable URL)
-# https://spacy.io/models/de#de_core_news_lg
-https://github.com/explosion/spacy-models/releases/download/de_core_news_lg-3.7.0/de_core_news_lg-3.7.0-py3-none-any.whl
+# Using medium model for faster cloud deployment (~50MB vs ~500MB for lg)
+# https://spacy.io/models/de#de_core_news_md
+https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.7.0/de_core_news_md-3.7.0-py3-none-any.whl
 
 # GitHub sync for Streamlit Cloud
 PyGithub>=2.1.0

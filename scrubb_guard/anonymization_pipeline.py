@@ -15,7 +15,8 @@ logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %
 logger = logging.getLogger("PII_Pipeline")
 
 # SpaCy model name (installed via requirements.txt)
-SPACY_MODEL = "de_core_news_lg"
+# Using medium model for faster cloud deployment (lg is ~500MB, md is ~50MB)
+SPACY_MODEL = "de_core_news_md"
 
 # Path to deny list config file
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
