@@ -88,24 +88,51 @@ class PiiPipeline:
 
         # Schritt 2: Anonymisierung (Ersetzen durch Placeholder)
         # Wir nutzen "Replace", um saubere Tokens für das LLM zu generieren: <PERSON>, <LOCATION>
+        # SpaCy German model uses: PER (person), LOC (location), GPE (geo-political), ORG, MISC
+        # Presidio maps some of these but we need to ensure all location types are covered
         anonymized_result = self.anonymizer.anonymize(
             text=text,
             analyzer_results=results,
             operators={
                 "DEFAULT": OperatorConfig("replace", {"new_value": "<PII>"}),
+                # Person entities
                 "PERSON": OperatorConfig("replace", {"new_value": "<PERSON>"}),
+                "PER": OperatorConfig("replace", {"new_value": "<PERSON>"}),
+                # Location entities (SpaCy uses LOC for non-GPE locations, GPE for cities/countries)
                 "LOCATION": OperatorConfig("replace", {"new_value": "<LOCATION>"}),
+                "LOC": OperatorConfig("replace", {"new_value": "<LOCATION>"}),
+                "GPE": OperatorConfig("replace", {"new_value": "<LOCATION>"}),
+                # Organization
+                "ORGANIZATION": OperatorConfig("replace", {"new_value": "<ORG>"}),
+                "ORG": OperatorConfig("replace", {"new_value": "<ORG>"}),
+                # Miscellaneous (often places, events, etc.)
+                "MISC": OperatorConfig("replace", {"new_value": "<MISC>"}),
+                # Custom entities
                 "GERMAN_ZIP": OperatorConfig("replace", {"new_value": "<PLZ>"}),
                 "INTERNAL_SENSITIVE": OperatorConfig("replace", {"new_value": "<INTERN>"}),
+                # Contact info
                 "PHONE_NUMBER": OperatorConfig("replace", {"new_value": "<TEL>"}),
                 "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "<EMAIL>"}),
+                # Additional common entity types
+                "DATE_TIME": OperatorConfig("replace", {"new_value": "<DATE>"}),
+                "NRP": OperatorConfig("replace", {"new_value": "<NRP>"}),  # Nationalities, religious, political groups
             }
         )
 
+        # Collect entity details for debugging/display
+        entities_found = []
+        for r in results:
+            entities_found.append({
+                "entity_type": r.entity_type,
+                "text": text[r.start:r.end],
+                "score": r.score
+            })
+        
         return {
             "original_length": len(text),
             "anonymized_text": anonymized_result.text,
-            "items_changed": len(results)
+            "items_changed": len(results),
+            "entities": entities_found
         }
 
     def _log_findings(self, results: List[RecognizerResult]):
