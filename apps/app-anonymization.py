@@ -89,19 +89,29 @@ st.set_page_config(
 
 
 # --- Password Protection ---
+def get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
+    """Safely get a secret, returning default if secrets file doesn't exist."""
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
 def check_password() -> bool:
     """Returns True if the user has entered the correct password."""
     
+    app_password = get_secret("APP_PASSWORD")
+    
     def password_entered():
         """Check if entered password matches."""
-        if st.session_state.get("password") == st.secrets.get("APP_PASSWORD"):
+        if st.session_state.get("password") == app_password:
             st.session_state["authenticated"] = True
             del st.session_state["password"]  # Don't store password
         else:
             st.session_state["authenticated"] = False
     
     # Check if password protection is enabled
-    if not st.secrets.get("APP_PASSWORD"):
+    if not app_password:
         return True  # No password set, allow access
     
     # Already authenticated
