@@ -43,6 +43,7 @@ models/
 !data/named_entities/namen.txt
 !data/named_entities/orte.txt
 !data/named_entities/safe_words.txt
+!config/deny_list.txt
 
 # Secrets
 .env

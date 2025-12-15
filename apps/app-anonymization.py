@@ -7,10 +7,75 @@ import sys
 import os
 import time
 from pathlib import Path
+from typing import Dict, Optional
+
+try:
+    from github import Github, GithubException  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency for cloud sync
+    Github = None  # type: ignore
+    GithubException = Exception  # type: ignore
 
 # Add parent directory to path to import scrubb_guard package
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scrubb_guard.anonymization_pipeline import PiiPipeline
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from scrubb_guard.anonymization_pipeline import (
+    PiiPipeline,
+    load_deny_list,
+    save_deny_list,
+    DENY_LIST_PATH,
+)
+
+
+# --- GitHub Sync Functions ---
+def get_github_settings() -> Dict[str, Optional[str]]:
+    """Get GitHub settings from environment or Streamlit secrets."""
+    token = os.environ.get("GITHUB_TOKEN")
+    repo_name = os.environ.get("GITHUB_REPO")
+    branch = os.environ.get("GITHUB_BRANCH", "main")
+    try:
+        secrets_obj = getattr(st, "secrets", None)
+        if secrets_obj is not None:
+            token = secrets_obj.get("GITHUB_TOKEN", token)
+            repo_name = secrets_obj.get("GITHUB_REPO", repo_name)
+            branch = secrets_obj.get("GITHUB_BRANCH", branch)
+    except Exception:
+        pass
+    return {
+        "token": token,
+        "repo": repo_name,
+        "branch": branch or "main",
+    }
+
+
+def commit_file_to_github(file_path: Path, message: str) -> bool:
+    """Commit the given file to GitHub using PyGithub (if configured)."""
+    settings = get_github_settings()
+    token = settings["token"]
+    repo_name = settings["repo"]
+    branch = settings["branch"]
+    if not token or not repo_name or Github is None:
+        return False
+    abs_path = file_path if isinstance(file_path, Path) else Path(file_path)
+    try:
+        rel_path = abs_path.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        rel_path = abs_path.as_posix()
+    try:
+        client = Github(token)
+        repo = client.get_repo(repo_name)
+        content = abs_path.read_text(encoding="utf-8")
+        try:
+            remote_file = repo.get_contents(rel_path, ref=branch)
+            repo.update_file(rel_path, message, content, remote_file.sha, branch=branch)
+        except GithubException as exc:
+            if getattr(exc, "status", None) == 404:
+                repo.create_file(rel_path, message, content, branch=branch)
+            else:
+                raise
+        return True
+    except Exception as exc:
+        st.warning(f"GitHub-Sync failed: {exc}")
+        return False
 
 # Page Config
 st.set_page_config(
@@ -132,6 +197,11 @@ def get_pipeline():
 pipeline = get_pipeline()
 
 
+# Initialize deny list in session state
+if "deny_list_text" not in st.session_state:
+    st.session_state.deny_list_text = "\n".join(load_deny_list())
+
+
 # Header
 st.markdown('<h1 class="main-title">🔒 PII Anonymizer</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Presidio + SpaCy German NER • Real-time PII Detection & Masking</p>', unsafe_allow_html=True)
@@ -150,6 +220,60 @@ entity_legend = """
 </div>
 """
 st.markdown(entity_legend, unsafe_allow_html=True)
+
+# Deny List Editor (collapsed by default)
+with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expanded=False):
+    st.markdown(
+        '<p style="color: #888; font-size: 0.85rem; margin-bottom: 0.5rem;">'
+        'One entry per line. These terms will always be masked as <code>&lt;INTERN&gt;</code>.</p>',
+        unsafe_allow_html=True
+    )
+    
+    deny_list_input = st.text_area(
+        "Deny List Entries",
+        value=st.session_state.deny_list_text,
+        height=120,
+        key="deny_list_editor",
+        label_visibility="collapsed",
+        placeholder="Dr. Müller\nKlinik am See\nProjekt Phoenix",
+    )
+    
+    col_save, col_reload = st.columns(2)
+    with col_save:
+        if st.button("💾 Save Deny List", use_container_width=True):
+            # Parse entries from text
+            entries = [line.strip() for line in deny_list_input.strip().split("\n") if line.strip()]
+            
+            # Save to file
+            if save_deny_list(entries):
+                st.session_state.deny_list_text = deny_list_input
+                
+                # Reload pipeline's deny list
+                pipeline.reload_deny_list()
+                
+                # Commit to GitHub if configured
+                github_success = commit_file_to_github(
+                    DENY_LIST_PATH,
+                    f"Update deny list ({len(entries)} entries)"
+                )
+                
+                if github_success:
+                    st.success(f"✅ Saved {len(entries)} entries (synced to GitHub)")
+                else:
+                    st.success(f"✅ Saved {len(entries)} entries locally")
+                    settings = get_github_settings()
+                    if not settings["token"] or not settings["repo"]:
+                        st.info("💡 Set GITHUB_TOKEN and GITHUB_REPO in secrets for cloud sync")
+            else:
+                st.error("❌ Failed to save deny list")
+    
+    with col_reload:
+        if st.button("🔄 Reload from File", use_container_width=True):
+            current_entries = load_deny_list()
+            st.session_state.deny_list_text = "\n".join(current_entries)
+            pipeline.reload_deny_list()
+            st.success(f"✅ Reloaded {len(current_entries)} entries")
+            st.rerun()
 
 st.divider()
 

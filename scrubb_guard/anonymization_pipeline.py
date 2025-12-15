@@ -1,6 +1,7 @@
 import logging
 import sys
-from typing import List, Dict
+from pathlib import Path
+from typing import List, Dict, Optional
 
 # Presidio Imports
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, RecognizerResult, Pattern
@@ -13,16 +14,52 @@ from presidio_anonymizer.entities import OperatorConfig
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("PII_Pipeline")
 
-# Konfiguration für interne "Deny List" (Mitarbeiter, Kliniknamen, etc.)
-INTERNAL_DENY_LIST = ["Dr. Müller", "Klinik am See", "Projekt Phoenix"]
+# Path to deny list config file
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DENY_LIST_PATH = PROJECT_ROOT / "config" / "deny_list.txt"
+
+
+def load_deny_list(path: Optional[Path] = None) -> List[str]:
+    """Load deny list from config file. Returns empty list if file doesn't exist."""
+    file_path = path or DENY_LIST_PATH
+    if not file_path.exists():
+        logger.warning(f"Deny list file not found: {file_path}")
+        return []
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        entries = [line.strip() for line in content.strip().split("\n") if line.strip()]
+        logger.info(f"Loaded {len(entries)} entries from deny list")
+        return entries
+    except Exception as e:
+        logger.error(f"Error loading deny list: {e}")
+        return []
+
+
+def save_deny_list(entries: List[str], path: Optional[Path] = None) -> bool:
+    """Save deny list to config file. Returns True on success."""
+    file_path = path or DENY_LIST_PATH
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("\n".join(entries) + "\n", encoding="utf-8")
+        logger.info(f"Saved {len(entries)} entries to deny list")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving deny list: {e}")
+        return False
 
 class PiiPipeline:
-    def __init__(self):
+    def __init__(self, deny_list: Optional[List[str]] = None):
         """
         Initialisiert die Pipeline.
         Dies sollte beim Start des Cloud Run Containers 1x passieren (Cold Start).
+        
+        Args:
+            deny_list: Optional custom deny list. If None, loads from config file.
         """
         logger.info("Initialisiere PII Pipeline und lade Modelle...")
+        
+        # Load deny list from file or use provided list
+        self.deny_list = deny_list if deny_list is not None else load_deny_list()
         
         # 1. SpaCy German Model Configuration
         # Wir zwingen Presidio, das 'de_core_news_lg' Modell zu nutzen.
@@ -42,7 +79,7 @@ class PiiPipeline:
         # 4. Anonymizer Engine instanziieren
         self.anonymizer = AnonymizerEngine()
         
-        logger.info("Pipeline bereit.")
+        logger.info(f"Pipeline bereit. Deny list: {len(self.deny_list)} entries.")
 
     def _add_custom_recognizers(self):
         """
@@ -60,12 +97,30 @@ class PiiPipeline:
 
         # B. Interne Deny-List (Kontext-Blacklist)
         # Erkennt spezifische interne Namen, egal was der Kontext sagt.
-        deny_list_recognizer = PatternRecognizer(
-            supported_entity="INTERNAL_SENSITIVE",
-            supported_language="de",
-            deny_list=INTERNAL_DENY_LIST
-        )
-        self.analyzer.registry.add_recognizer(deny_list_recognizer)
+        self._update_deny_list_recognizer()
+
+    def _update_deny_list_recognizer(self):
+        """Update or create the deny list recognizer with current deny_list."""
+        # Remove existing deny list recognizer if present
+        existing = [r for r in self.analyzer.registry.recognizers 
+                   if getattr(r, 'supported_entities', None) == ["INTERNAL_SENSITIVE"]]
+        for r in existing:
+            self.analyzer.registry.remove_recognizer(r)
+        
+        # Add new recognizer if deny list has entries
+        if self.deny_list:
+            deny_list_recognizer = PatternRecognizer(
+                supported_entity="INTERNAL_SENSITIVE",
+                supported_language="de",
+                deny_list=self.deny_list
+            )
+            self.analyzer.registry.add_recognizer(deny_list_recognizer)
+
+    def reload_deny_list(self) -> List[str]:
+        """Reload deny list from config file and update the recognizer."""
+        self.deny_list = load_deny_list()
+        self._update_deny_list_recognizer()
+        return self.deny_list
 
     def process(self, text: str) -> Dict:
         """
