@@ -161,14 +161,14 @@ EXAMPLE_TEXTS = [
     "Ich komme aus Oer-Erkenschwick.",
 ]
 
-# Store selected example in session state
-if "input_text" not in st.session_state:
-    st.session_state.input_text = ""
+# Initialize session state for form input
+if "form_input" not in st.session_state:
+    st.session_state.form_input = ""
 
 
 def set_example(example_text: str):
-    """Callback to set example text."""
-    st.session_state.input_text = example_text
+    """Callback to set example text in the form."""
+    st.session_state.form_input = example_text
 
 
 # Quick examples section
@@ -189,9 +189,9 @@ for i, (col, example) in enumerate(zip(cols, EXAMPLE_TEXTS)):
 with st.form(key="anonymize_form"):
     user_text = st.text_area(
         "Enter German text to anonymize (Ctrl+Enter to submit):",
-        value=st.session_state.input_text,
         height=120,
         placeholder="Geben Sie deutschen Text ein, der personenbezogene Daten enthält...",
+        key="form_input",  # Direct binding to session state
     )
     
     # Center the submit button
@@ -199,17 +199,13 @@ with st.form(key="anonymize_form"):
     with col2:
         process_btn = st.form_submit_button("🚀 Anonymize", type="primary", use_container_width=True)
 
-# Update session state when form is submitted
-if user_text:
-    st.session_state.input_text = user_text
-
 # Process when form submitted (button click or Ctrl+Enter)
-if process_btn and user_text:
+if process_btn and st.session_state.form_input:
     st.divider()
     
     # Run the pipeline
     with st.spinner("Analyzing..."):
-        result = pipeline.process(user_text)
+        result = pipeline.process(st.session_state.form_input)
     
     # Compact stats line
     st.markdown(
@@ -226,7 +222,7 @@ if process_btn and user_text:
         st.markdown("**Original Text**")
         st.text_area(
             "Original:",
-            value=user_text,
+            value=st.session_state.form_input,
             height=150,
             disabled=True,
             label_visibility="collapsed"
@@ -272,7 +268,7 @@ if process_btn and user_text:
                     unsafe_allow_html=True
                 )
 
-elif process_btn and not user_text:
+elif process_btn and not st.session_state.form_input:
     st.warning("Please enter some text to anonymize.")
 
 # Footer
