@@ -110,3 +110,4 @@ These files are loaded at initialization time.
 
 [Add contribution guidelines if needed]
 
+# Streamlit Cloud deployment
