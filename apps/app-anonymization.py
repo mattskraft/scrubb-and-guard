@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
+import spacy
+
 try:
     from github import Github, GithubException  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency for cloud sync
@@ -23,6 +25,7 @@ from scrubb_guard.anonymization_pipeline import (
     load_deny_list,
     save_deny_list,
     DENY_LIST_PATH,
+    SPACY_MODEL,
 )
 
 
@@ -193,8 +196,29 @@ def get_pipeline():
     return PiiPipeline()
 
 
-# Load the pipeline
+@st.cache_resource
+def get_model_info():
+    """Get SpaCy and model version info."""
+    try:
+        nlp = spacy.load(SPACY_MODEL)
+        return {
+            "python": sys.version.split()[0],
+            "spacy": spacy.__version__,
+            "model_name": nlp.meta.get("name", SPACY_MODEL),
+            "model_version": nlp.meta.get("version", "unknown"),
+        }
+    except Exception as e:
+        return {
+            "python": sys.version.split()[0],
+            "spacy": spacy.__version__,
+            "model_name": SPACY_MODEL,
+            "model_version": f"error: {e}",
+        }
+
+
+# Load the pipeline and model info
 pipeline = get_pipeline()
+model_info = get_model_info()
 
 
 # Initialize deny list in session state
@@ -280,10 +304,12 @@ st.divider()
 # Example texts for quick testing
 EXAMPLE_TEXTS = [
     "Ich heiße Peter Müller und wohne in 12345 Berlin.",
-    "Mein Arzt ist Dr. Müller in der Klinik am See.",
     "Ruf mich an unter 0176-12345678 oder mail mir: peter@example.com",
-    "Wir treffen uns in Essen zum Essen.",
     "Ich komme aus Oer-Erkenschwick.",
+    "Wir treffen uns in Essen zum Essen.",
+    "Mein Arzt ist Dr. Müller in der Klinik am See.",
+    "Kiso Mind ist eine Drecksapp.",
+    "Den Anzaldo Brüdern kann man nicht trauen."
 ]
 
 # Initialize session state for form input
@@ -402,10 +428,13 @@ elif process_btn and not user_text:
 
 # Footer
 st.divider()
-st.markdown("""
+st.markdown(f"""
 <div style="text-align: center; color: #666; font-size: 0.8rem;">
-    Powered by <strong>Presidio</strong> + <strong>SpaCy de_core_news_lg</strong><br>
+    Powered by <strong>Presidio</strong> + <strong>SpaCy</strong><br>
     🔒 All processing happens locally • No data leaves your machine
+</div>
+<div style="text-align: center; color: #555; font-size: 0.7rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace;">
+    Python {model_info['python']} · spacy {model_info['spacy']} · {model_info['model_name']} v{model_info['model_version']}
 </div>
 """, unsafe_allow_html=True)
 
