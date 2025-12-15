@@ -5,6 +5,7 @@ Uses Presidio + SpaCy for German PII detection and anonymization.
 import streamlit as st
 import sys
 import os
+import time
 from pathlib import Path
 
 # Add parent directory to path to import scrubb_guard package
@@ -204,15 +205,18 @@ with st.form(key="anonymize_form"):
 if process_btn and user_text:
     st.divider()
     
-    # Run the pipeline
+    # Run the pipeline with timing
     with st.spinner("Analyzing..."):
+        start_time = time.perf_counter()
         result = pipeline.process(user_text)
+        inference_time_ms = (time.perf_counter() - start_time) * 1000
     
-    # Compact stats line
+    # Compact stats line with inference time
     st.markdown(
         f'<p style="color: #888; font-size: 0.9rem; margin-bottom: 1rem;">'
         f'<strong>{result["original_length"]}</strong> characters · '
-        f'<strong style="color: #00d4ff;">{result["items_changed"]}</strong> PIIs found</p>',
+        f'<strong style="color: #00d4ff;">{result["items_changed"]}</strong> PIIs found · '
+        f'<strong style="color: #ffc300;">{inference_time_ms:.1f}ms</strong></p>',
         unsafe_allow_html=True
     )
     
