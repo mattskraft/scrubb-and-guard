@@ -77,6 +77,7 @@ class PiiPipeline:
         self.analyzer = AnalyzerEngine(nlp_engine=self.nlp_engine, supported_languages=["de"])
         
         # 3. Custom Recognizers hinzufügen (Die "Ingenieurs-Schicht")
+        self._deny_list_recognizer = None  # Track our deny list recognizer
         self._add_custom_recognizers()
         
         # 4. Anonymizer Engine instanziieren
@@ -119,20 +120,22 @@ class PiiPipeline:
 
     def _update_deny_list_recognizer(self):
         """Update or create the deny list recognizer with current deny_list."""
-        # Remove existing deny list recognizer if present
-        existing = [r for r in self.analyzer.registry.recognizers 
-                   if getattr(r, 'supported_entities', None) == ["INTERNAL_SENSITIVE"]]
-        for r in existing:
-            self.analyzer.registry.remove_recognizer(r)
+        # Remove existing deny list recognizer if we have one
+        if self._deny_list_recognizer is not None:
+            try:
+                self.analyzer.registry.remove_recognizer(self._deny_list_recognizer)
+            except Exception:
+                pass  # Recognizer might already be removed
+            self._deny_list_recognizer = None
         
         # Add new recognizer if deny list has entries
         if self.deny_list:
-            deny_list_recognizer = PatternRecognizer(
+            self._deny_list_recognizer = PatternRecognizer(
                 supported_entity="INTERNAL_SENSITIVE",
                 supported_language="de",
                 deny_list=self.deny_list
             )
-            self.analyzer.registry.add_recognizer(deny_list_recognizer)
+            self.analyzer.registry.add_recognizer(self._deny_list_recognizer)
 
     def reload_deny_list(self, entries: Optional[List[str]] = None) -> List[str]:
         """Reload deny list and update the recognizer.
