@@ -121,11 +121,13 @@ class PiiPipeline:
     def _update_deny_list_recognizer(self):
         """Update or create the deny list recognizer with current deny_list."""
         # Remove existing deny list recognizer if we have one
+        # Note: registry.remove_recognizer() is broken, use direct list manipulation
         if self._deny_list_recognizer is not None:
             try:
-                self.analyzer.registry.remove_recognizer(self._deny_list_recognizer)
+                if self._deny_list_recognizer in self.analyzer.registry.recognizers:
+                    self.analyzer.registry.recognizers.remove(self._deny_list_recognizer)
             except Exception:
-                pass  # Recognizer might already be removed
+                pass
             self._deny_list_recognizer = None
         
         # Add new recognizer if deny list has entries
