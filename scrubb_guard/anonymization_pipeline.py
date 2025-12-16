@@ -134,9 +134,17 @@ class PiiPipeline:
             )
             self.analyzer.registry.add_recognizer(deny_list_recognizer)
 
-    def reload_deny_list(self) -> List[str]:
-        """Reload deny list from config file and update the recognizer."""
-        self.deny_list = load_deny_list()
+    def reload_deny_list(self, entries: Optional[List[str]] = None) -> List[str]:
+        """Reload deny list and update the recognizer.
+        
+        Args:
+            entries: If provided, use these entries directly. 
+                     If None, reload from config file.
+        """
+        if entries is not None:
+            self.deny_list = entries
+        else:
+            self.deny_list = load_deny_list()
         self._update_deny_list_recognizer()
         return self.deny_list
 

@@ -331,8 +331,8 @@ with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expa
             if save_deny_list(entries):
                 st.session_state.deny_list_text = deny_list_input
                 
-                # Reload pipeline's deny list
-                pipeline.reload_deny_list()
+                # Update pipeline's deny list directly (don't rely on file read)
+                pipeline.reload_deny_list(entries)
                 
                 # Commit to GitHub if configured
                 github_success = commit_file_to_github(
