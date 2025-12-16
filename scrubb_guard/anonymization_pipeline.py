@@ -1,7 +1,7 @@
 import logging
 import sys
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 # Presidio Imports
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, RecognizerResult, Pattern
@@ -10,7 +10,6 @@ from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
 # --- KONFIGURATION & LOGGING ---
-#logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("PII_Pipeline")
 
@@ -20,6 +19,63 @@ SPACY_MODEL = "de_core_news_lg"
 # Path to deny list config file
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DENY_LIST_PATH = PROJECT_ROOT / "config" / "deny_list.txt"
+
+# --- ENTITY CONFIGURATION (Single Source of Truth) ---
+# Maps internal Presidio/SpaCy entity types to German display labels
+# Format: (display_label, css_class_suffix, hex_color)
+ENTITY_DISPLAY: Dict[str, Tuple[str, str, str]] = {
+    # Display label -> (label, css_class, color)
+    "<PERSON>": ("<PERSON>", "person", "#c77dff"),
+    "<ORT>": ("<ORT>", "location", "#00d4ff"),
+    "<ORG>": ("<ORG>", "org", "#ffaa44"),
+    "<PLZ>": ("<PLZ>", "plz", "#ff006e"),
+    "<TEL>": ("<TEL>", "tel", "#ffc300"),
+    "<EMAIL>": ("<EMAIL>", "email", "#00ff85"),
+    "<INTERN>": ("<INTERN>", "intern", "#ff5959"),
+    "<SONSTIG>": ("<SONSTIG>", "misc", "#bb99ff"),
+    "<DATUM>": ("<DATUM>", "date", "#99ddff"),
+    "<GRUPPE>": ("<GRUPPE>", "group", "#aaaaaa"),
+    "<DATEN>": ("<DATEN>", "default", "#888888"),
+}
+
+# Maps Presidio/SpaCy entity types to our German display labels
+ENTITY_MAPPING: Dict[str, str] = {
+    # Person entities
+    "PERSON": "<PERSON>",
+    "PER": "<PERSON>",
+    # Location entities
+    "LOCATION": "<ORT>",
+    "LOC": "<ORT>",
+    "GPE": "<ORT>",
+    # Organization
+    "ORGANIZATION": "<ORG>",
+    "ORG": "<ORG>",
+    # Miscellaneous
+    "MISC": "<SONSTIG>",
+    # Custom entities
+    "GERMAN_ZIP": "<PLZ>",
+    "INTERNAL_SENSITIVE": "<INTERN>",
+    # Contact info
+    "PHONE_NUMBER": "<TEL>",
+    "EMAIL_ADDRESS": "<EMAIL>",
+    # Time
+    "DATE_TIME": "<DATUM>",
+    # Groups (Nationalities, Religious, Political)
+    "NRP": "<GRUPPE>",
+    # Default fallback
+    "DEFAULT": "<DATEN>",
+}
+
+# Labels shown in UI legend (subset of most common)
+ENTITY_LEGEND_LABELS = ["<PERSON>", "<ORT>", "<ORG>", "<PLZ>", "<TEL>", "<EMAIL>", "<INTERN>"]
+
+
+def get_anonymizer_operators() -> Dict[str, OperatorConfig]:
+    """Build the operators dict for AnonymizerEngine from ENTITY_MAPPING."""
+    operators = {}
+    for entity_type, label in ENTITY_MAPPING.items():
+        operators[entity_type] = OperatorConfig("replace", {"new_value": label})
+    return operators
 
 
 def load_deny_list(path: Optional[Path] = None) -> List[str]:
@@ -172,37 +228,11 @@ class PiiPipeline:
         # Audit-Log (Nur Typen, keine Inhalte!)
         self._log_findings(results)
 
-        # Schritt 2: Anonymisierung (Ersetzen durch Placeholder)
-        # Wir nutzen "Replace", um saubere Tokens für das LLM zu generieren: <PERSON>, <LOCATION>
-        # SpaCy German model uses: PER (person), LOC (location), GPE (geo-political), ORG, MISC
-        # Presidio maps some of these but we need to ensure all location types are covered
+        # Schritt 2: Anonymisierung (Ersetzen durch deutsche Placeholder)
         anonymized_result = self.anonymizer.anonymize(
             text=text,
             analyzer_results=results,
-            operators={
-                "DEFAULT": OperatorConfig("replace", {"new_value": "<PII>"}),
-                # Person entities
-                "PERSON": OperatorConfig("replace", {"new_value": "<PERSON>"}),
-                "PER": OperatorConfig("replace", {"new_value": "<PERSON>"}),
-                # Location entities (SpaCy uses LOC for non-GPE locations, GPE for cities/countries)
-                "LOCATION": OperatorConfig("replace", {"new_value": "<LOCATION>"}),
-                "LOC": OperatorConfig("replace", {"new_value": "<LOCATION>"}),
-                "GPE": OperatorConfig("replace", {"new_value": "<LOCATION>"}),
-                # Organization
-                "ORGANIZATION": OperatorConfig("replace", {"new_value": "<ORG>"}),
-                "ORG": OperatorConfig("replace", {"new_value": "<ORG>"}),
-                # Miscellaneous (often places, events, etc.)
-                "MISC": OperatorConfig("replace", {"new_value": "<MISC>"}),
-                # Custom entities
-                "GERMAN_ZIP": OperatorConfig("replace", {"new_value": "<PLZ>"}),
-                "INTERNAL_SENSITIVE": OperatorConfig("replace", {"new_value": "<INTERN>"}),
-                # Contact info
-                "PHONE_NUMBER": OperatorConfig("replace", {"new_value": "<TEL>"}),
-                "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "<EMAIL>"}),
-                # Additional common entity types
-                "DATE_TIME": OperatorConfig("replace", {"new_value": "<DATE>"}),
-                "NRP": OperatorConfig("replace", {"new_value": "<NRP>"}),  # Nationalities, religious, political groups
-            }
+            operators=get_anonymizer_operators()
         )
 
         # Collect entity details for debugging/display

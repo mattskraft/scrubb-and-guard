@@ -26,6 +26,8 @@ from scrubb_guard.anonymization_pipeline import (
     save_deny_list,
     DENY_LIST_PATH,
     SPACY_MODEL,
+    ENTITY_DISPLAY,
+    ENTITY_LEGEND_LABELS,
 )
 
 
@@ -184,17 +186,10 @@ st.markdown("""
         font-size: 0.8rem;
         margin: 0.2rem;
     }
-    
-    .entity-person { background: #7b2cbf33; border: 1px solid #7b2cbf; color: #c77dff; }
-    .entity-location { background: #00d4ff33; border: 1px solid #00d4ff; color: #00d4ff; }
-    .entity-org { background: #ff8c0033; border: 1px solid #ff8c00; color: #ffaa44; }
-    .entity-plz { background: #ff006e33; border: 1px solid #ff006e; color: #ff006e; }
-    .entity-tel { background: #ffc30033; border: 1px solid #ffc300; color: #ffc300; }
-    .entity-email { background: #00ff8533; border: 1px solid #00ff85; color: #00ff85; }
-    .entity-intern { background: #ff595933; border: 1px solid #ff5959; color: #ff5959; }
-    .entity-misc { background: #9966ff33; border: 1px solid #9966ff; color: #bb99ff; }
-    .entity-date { background: #66ccff33; border: 1px solid #66ccff; color: #99ddff; }
-    .entity-default { background: #88888833; border: 1px solid #888888; color: #aaa; }
+    """ + "\n    ".join([
+        f".entity-{css_class} {{ background: {color}33; border: 1px solid {color}; color: {color}; }}"
+        for label, (_, css_class, color) in ENTITY_DISPLAY.items()
+    ]) + """
     
     .output-box {
         font-family: 'JetBrains Mono', monospace;
@@ -289,20 +284,15 @@ if "deny_list_text" not in st.session_state:
 st.markdown('<h1 class="main-title">🔒 PII Anonymizer</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Presidio + SpaCy German NER • Real-time PII Detection & Masking</p>', unsafe_allow_html=True)
 
-# Entity legend
+# Entity legend (generated from pipeline config)
 st.markdown("##### Detected Entity Types")
-entity_legend = """
-<div style="margin-bottom: 1.5rem;">
-    <span class="entity-tag entity-person">&lt;PERSON&gt;</span>
-    <span class="entity-tag entity-location">&lt;LOCATION&gt;</span>
-    <span class="entity-tag entity-org">&lt;ORG&gt;</span>
-    <span class="entity-tag entity-plz">&lt;PLZ&gt;</span>
-    <span class="entity-tag entity-tel">&lt;TEL&gt;</span>
-    <span class="entity-tag entity-email">&lt;EMAIL&gt;</span>
-    <span class="entity-tag entity-intern">&lt;INTERN&gt;</span>
-</div>
-"""
-st.markdown(entity_legend, unsafe_allow_html=True)
+legend_html = '<div style="margin-bottom: 1.5rem;">'
+for label in ENTITY_LEGEND_LABELS:
+    _, css_class, _ = ENTITY_DISPLAY[label]
+    escaped_label = label.replace("<", "&lt;").replace(">", "&gt;")
+    legend_html += f'<span class="entity-tag entity-{css_class}">{escaped_label}</span>'
+legend_html += '</div>'
+st.markdown(legend_html, unsafe_allow_html=True)
 
 # Deny List Editor (collapsed by default)
 with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expanded=False):
@@ -432,28 +422,14 @@ if process_btn and user_text:
     
     with col_anon:
         st.markdown("**Anonymized Text**")
-        # Highlight the anonymized tokens with colors
-        anonymized = result['anonymized_text']
-        
-        # Apply color coding to output
-        highlighted = anonymized
-        replacements = [
-            ("<PERSON>", '<span class="entity-tag entity-person">&lt;PERSON&gt;</span>'),
-            ("<LOCATION>", '<span class="entity-tag entity-location">&lt;LOCATION&gt;</span>'),
-            ("<ORG>", '<span class="entity-tag entity-org">&lt;ORG&gt;</span>'),
-            ("<PLZ>", '<span class="entity-tag entity-plz">&lt;PLZ&gt;</span>'),
-            ("<TEL>", '<span class="entity-tag entity-tel">&lt;TEL&gt;</span>'),
-            ("<EMAIL>", '<span class="entity-tag entity-email">&lt;EMAIL&gt;</span>'),
-            ("<INTERN>", '<span class="entity-tag entity-intern">&lt;INTERN&gt;</span>'),
-            ("<MISC>", '<span class="entity-tag entity-misc">&lt;MISC&gt;</span>'),
-            ("<DATE>", '<span class="entity-tag entity-date">&lt;DATE&gt;</span>'),
-            ("<NRP>", '<span class="entity-tag entity-default">&lt;NRP&gt;</span>'),
-            ("<PII>", '<span class="entity-tag entity-default">&lt;PII&gt;</span>'),
-        ]
-        
-        for old, new in replacements:
-            highlighted = highlighted.replace(old, new)
-        
+        # Highlight the anonymized tokens with colors (generated from pipeline config)
+        highlighted = result['anonymized_text']
+        for label, (_, css_class, _) in ENTITY_DISPLAY.items():
+            escaped = label.replace("<", "&lt;").replace(">", "&gt;")
+            highlighted = highlighted.replace(
+                label, 
+                f'<span class="entity-tag entity-{css_class}">{escaped}</span>'
+            )
         st.markdown(f'<div class="output-box">{highlighted}</div>', unsafe_allow_html=True)
     
     # Copy button for anonymized text
