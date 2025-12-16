@@ -340,13 +340,11 @@ with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expa
                     f"Update deny list ({len(entries)} entries)"
                 )
                 
-                if github_success:
-                    st.success(f"✅ Saved {len(entries)} entries (synced to GitHub)")
-                else:
-                    st.success(f"✅ Saved {len(entries)} entries locally")
-                    settings = get_github_settings()
-                    if not settings["token"] or not settings["repo"]:
-                        st.info("💡 Set GITHUB_TOKEN and GITHUB_REPO in secrets for cloud sync")
+                # Store success message in session state (shown after rerun)
+                st.session_state.deny_list_saved = True
+                st.session_state.deny_list_count = len(entries)
+                st.session_state.deny_list_github = github_success
+                st.rerun()
             else:
                 st.error("❌ Failed to save deny list")
     
@@ -355,8 +353,27 @@ with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expa
             current_entries = load_deny_list()
             st.session_state.deny_list_text = "\n".join(current_entries)
             pipeline.reload_deny_list()
-            st.success(f"✅ Reloaded {len(current_entries)} entries")
+            st.session_state.deny_list_reloaded = True
+            st.session_state.deny_list_count = len(current_entries)
             st.rerun()
+    
+    # Show success messages after rerun
+    if st.session_state.get("deny_list_saved"):
+        count = st.session_state.pop("deny_list_count", 0)
+        github = st.session_state.pop("deny_list_github", False)
+        st.session_state.pop("deny_list_saved", None)
+        if github:
+            st.success(f"✅ Saved {count} entries (synced to GitHub)")
+        else:
+            st.success(f"✅ Saved {count} entries locally")
+            settings = get_github_settings()
+            if not settings["token"] or not settings["repo"]:
+                st.info("💡 Set GITHUB_TOKEN and GITHUB_REPO in secrets for cloud sync")
+    
+    if st.session_state.get("deny_list_reloaded"):
+        count = st.session_state.pop("deny_list_count", 0)
+        st.session_state.pop("deny_list_reloaded", None)
+        st.success(f"✅ Reloaded {count} entries")
 
 st.divider()
 
