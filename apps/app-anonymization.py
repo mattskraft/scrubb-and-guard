@@ -280,9 +280,21 @@ pipeline = get_pipeline()
 model_info = get_model_info()
 
 
-# Initialize deny list in session state
+# Initialize deny list in session state (from file on first load)
 if "deny_list_text" not in st.session_state:
     st.session_state.deny_list_text = "\n".join(load_deny_list())
+
+
+def get_current_deny_list() -> list:
+    """Parse current deny list from session state text."""
+    text = st.session_state.get("deny_list_text", "")
+    return [line.strip() for line in text.strip().split("\n") if line.strip()]
+
+
+def sync_deny_list():
+    """Sync pipeline's deny list with current UI state."""
+    entries = get_current_deny_list()
+    pipeline.reload_deny_list(entries)
 
 
 # Header
@@ -308,10 +320,11 @@ st.markdown(entity_legend, unsafe_allow_html=True)
 with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expanded=False):
     st.markdown(
         '<p style="color: #888; font-size: 0.85rem; margin-bottom: 0.5rem;">'
-        'One entry per line. These terms will always be masked as <code>&lt;INTERN&gt;</code>.</p>',
+        'One entry per line. Changes take effect immediately (Ctrl+Enter to apply).</p>',
         unsafe_allow_html=True
     )
     
+    # Text area syncs directly to session state
     deny_list_input = st.text_area(
         "Deny List Entries",
         value=st.session_state.deny_list_text,
@@ -321,59 +334,30 @@ with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expa
         placeholder="Dr. Müller\nKlinik am See\nProjekt Phoenix",
     )
     
-    col_save, col_reload = st.columns(2)
-    with col_save:
-        if st.button("💾 Save Deny List", use_container_width=True):
-            # Parse entries from text
-            entries = [line.strip() for line in deny_list_input.strip().split("\n") if line.strip()]
-            
-            # Save to file
-            if save_deny_list(entries):
-                st.session_state.deny_list_text = deny_list_input
-                
-                # Update pipeline's deny list directly (don't rely on file read)
-                pipeline.reload_deny_list(entries)
-                
-                # Commit to GitHub if configured
-                github_success = commit_file_to_github(
-                    DENY_LIST_PATH,
-                    f"Update deny list ({len(entries)} entries)"
-                )
-                
-                # Store success message in session state (shown after rerun)
-                st.session_state.deny_list_saved = True
-                st.session_state.deny_list_count = len(entries)
-                st.session_state.deny_list_github = github_success
-                st.rerun()
+    # Update session state if text changed
+    if deny_list_input != st.session_state.deny_list_text:
+        st.session_state.deny_list_text = deny_list_input
+    
+    # Always sync pipeline with current deny list text
+    sync_deny_list()
+    
+    # Save to file/GitHub button
+    if st.button("💾 Save to File & Sync to GitHub", use_container_width=True):
+        entries = get_current_deny_list()
+        if save_deny_list(entries):
+            github_success = commit_file_to_github(
+                DENY_LIST_PATH,
+                f"Update deny list ({len(entries)} entries)"
+            )
+            if github_success:
+                st.success(f"✅ Saved {len(entries)} entries (synced to GitHub)")
             else:
-                st.error("❌ Failed to save deny list")
-    
-    with col_reload:
-        if st.button("🔄 Reload from File", use_container_width=True):
-            current_entries = load_deny_list()
-            st.session_state.deny_list_text = "\n".join(current_entries)
-            pipeline.reload_deny_list()
-            st.session_state.deny_list_reloaded = True
-            st.session_state.deny_list_count = len(current_entries)
-            st.rerun()
-    
-    # Show success messages after rerun
-    if st.session_state.get("deny_list_saved"):
-        count = st.session_state.pop("deny_list_count", 0)
-        github = st.session_state.pop("deny_list_github", False)
-        st.session_state.pop("deny_list_saved", None)
-        if github:
-            st.success(f"✅ Saved {count} entries (synced to GitHub)")
+                st.success(f"✅ Saved {len(entries)} entries locally")
+                settings = get_github_settings()
+                if not settings["token"] or not settings["repo"]:
+                    st.info("💡 Set GITHUB_TOKEN and GITHUB_REPO in secrets for cloud sync")
         else:
-            st.success(f"✅ Saved {count} entries locally")
-            settings = get_github_settings()
-            if not settings["token"] or not settings["repo"]:
-                st.info("💡 Set GITHUB_TOKEN and GITHUB_REPO in secrets for cloud sync")
-    
-    if st.session_state.get("deny_list_reloaded"):
-        count = st.session_state.pop("deny_list_count", 0)
-        st.session_state.pop("deny_list_reloaded", None)
-        st.success(f"✅ Reloaded {count} entries")
+            st.error("❌ Failed to save deny list")
 
 st.divider()
 
