@@ -285,18 +285,6 @@ if "deny_list_text" not in st.session_state:
     st.session_state.deny_list_text = "\n".join(load_deny_list())
 
 
-def get_current_deny_list() -> list:
-    """Parse current deny list from session state text."""
-    text = st.session_state.get("deny_list_text", "")
-    return [line.strip() for line in text.strip().split("\n") if line.strip()]
-
-
-def sync_deny_list():
-    """Sync pipeline's deny list with current UI state."""
-    entries = get_current_deny_list()
-    pipeline.reload_deny_list(entries)
-
-
 # Header
 st.markdown('<h1 class="main-title">🔒 PII Anonymizer</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Presidio + SpaCy German NER • Real-time PII Detection & Masking</p>', unsafe_allow_html=True)
@@ -324,8 +312,8 @@ with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expa
         unsafe_allow_html=True
     )
     
-    # Text area syncs directly to session state
-    deny_list_input = st.text_area(
+    # Text area - the value here IS the deny list
+    deny_list_text = st.text_area(
         "Deny List Entries",
         value=st.session_state.deny_list_text,
         height=120,
@@ -334,25 +322,26 @@ with st.expander("⚙️ Internal Deny List (custom terms to always mask)", expa
         placeholder="Dr. Müller\nKlinik am See\nProjekt Phoenix",
     )
     
-    # Update session state if text changed
-    if deny_list_input != st.session_state.deny_list_text:
-        st.session_state.deny_list_text = deny_list_input
+    # Parse entries from text area (this is the deny list, period)
+    deny_list_entries = [line.strip() for line in deny_list_text.strip().split("\n") if line.strip()]
     
-    # Always sync pipeline with current deny list text
-    sync_deny_list()
+    # Update pipeline with current entries
+    pipeline.reload_deny_list(deny_list_entries)
+    
+    # Update session state for persistence
+    st.session_state.deny_list_text = deny_list_text
     
     # Save to file/GitHub button
     if st.button("💾 Save to File & Sync to GitHub", use_container_width=True):
-        entries = get_current_deny_list()
-        if save_deny_list(entries):
+        if save_deny_list(deny_list_entries):
             github_success = commit_file_to_github(
                 DENY_LIST_PATH,
-                f"Update deny list ({len(entries)} entries)"
+                f"Update deny list ({len(deny_list_entries)} entries)"
             )
             if github_success:
-                st.success(f"✅ Saved {len(entries)} entries (synced to GitHub)")
+                st.success(f"✅ Saved {len(deny_list_entries)} entries (synced to GitHub)")
             else:
-                st.success(f"✅ Saved {len(entries)} entries locally")
+                st.success(f"✅ Saved {len(deny_list_entries)} entries locally")
                 settings = get_github_settings()
                 if not settings["token"] or not settings["repo"]:
                     st.info("💡 Set GITHUB_TOKEN and GITHUB_REPO in secrets for cloud sync")
