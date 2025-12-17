@@ -78,6 +78,29 @@ class ClassificationResult:
         }
 
 
+@dataclass
+class RelevanceResult:
+    """Result of question-answer relevance check."""
+    question: str
+    answer: str
+    is_relevant: bool
+    relevance_score: float
+    irrelevance_score: float
+    verdict: str  # "relevant" or "off-topic"
+    
+    def to_dict(self) -> Dict:
+        """Convert to dictionary format."""
+        return {
+            "question": self.question,
+            "answer": self.answer,
+            "combined_input": f"Frage: {self.question} Antwort: {self.answer}",
+            "is_relevant": self.is_relevant,
+            "relevance_score": self.relevance_score,
+            "irrelevance_score": self.irrelevance_score,
+            "verdict": self.verdict,
+        }
+
+
 class ZeroShotClassifier:
     """
     Zero-shot text classifier using multilingual NLI model.
@@ -200,6 +223,77 @@ class ZeroShotClassifier:
                 hypothesis_template, label_mapping
             ))
         return results
+    
+    def check_relevance(
+        self,
+        question: str,
+        answer: str,
+        relevance_threshold: float = 0.5,
+        labels: Optional[List[str]] = None,
+        hypothesis_template: str = "Diese Antwort ist {}."
+    ) -> RelevanceResult:
+        """
+        Check if an answer is relevant to a question.
+        
+        Uses zero-shot classification to detect off-topic responses,
+        trolling attempts, or nonsensical "word salad" answers.
+        
+        Args:
+            question: The question that was asked
+            answer: The answer to evaluate
+            relevance_threshold: Score threshold for considering answer relevant (default 0.5)
+            labels: Custom labels (default: German relevance labels)
+            hypothesis_template: NLI hypothesis template
+        
+        Returns:
+            RelevanceResult with relevance verdict and scores
+        """
+        if labels is None:
+            labels = [
+                "eine sinnvolle, relevante Antwort",
+                "Themenverfehlung oder Unsinn"
+            ]
+        
+        # Combine question and answer for context
+        input_text = f"Frage: {question} Antwort: {answer}"
+        
+        if not answer.strip():
+            return RelevanceResult(
+                question=question,
+                answer=answer,
+                is_relevant=False,
+                relevance_score=0.0,
+                irrelevance_score=1.0,
+                verdict="off-topic"
+            )
+        
+        output = self.pipeline(
+            input_text, 
+            labels, 
+            multi_label=False,
+            hypothesis_template=hypothesis_template
+        )
+        
+        # Find scores for each category
+        relevance_score = 0.0
+        irrelevance_score = 0.0
+        
+        for label, score in zip(output["labels"], output["scores"]):
+            if "sinnvoll" in label.lower() or "relevant" in label.lower():
+                relevance_score = score
+            else:
+                irrelevance_score = score
+        
+        is_relevant = relevance_score >= relevance_threshold
+        
+        return RelevanceResult(
+            question=question,
+            answer=answer,
+            is_relevant=is_relevant,
+            relevance_score=relevance_score,
+            irrelevance_score=irrelevance_score,
+            verdict="relevant" if is_relevant else "off-topic"
+        )
 
 
 # --- ENTRY POINT ---
