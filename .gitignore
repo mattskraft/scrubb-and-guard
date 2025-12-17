@@ -34,6 +34,7 @@ ENV/
 *~
 
 # Project specific
+results/
 pii_data/
 mobile_assets/
 models/
