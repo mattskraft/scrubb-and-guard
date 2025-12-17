@@ -7,7 +7,7 @@ Generate training data for German safety classification using multiple strategie
 - negations: Generate hard negatives (safe sentences with dangerous keywords)
 - twins: Generate anti-evil twins (flip UNSAFE to SAFE keeping style)
 - clinical: Generate clinical scenarios with ternary labels (UNSAFE, RELEVANT_BUT_SAFE, SAFE_CONTEXT)
-- answers: Generate free text answers from exercises JSON (strapi-to-structured-text)
+- answers: Generate free text answers from kiso_app_merged_structured.json
 
 Usage:
     python data_generator.py synthetic --id v1 --count 200
@@ -15,7 +15,7 @@ Usage:
     python data_generator.py negations --id v2 --count 100
     python data_generator.py twins --id v3 --input data/synthetic/german_safety_v2_translate.csv --count 500
     python data_generator.py clinical --id v5
-    python data_generator.py answers --id v6 --input /path/to/exercises_nested.json
+    python data_generator.py answers --id v6
     python data_generator.py all --id v4 --synthetic 100 --translate 500 --negations 100 --twins 200
 
 Output files are named: german_safety_{id}_{mode}.csv
@@ -182,13 +182,15 @@ OUTPUT_LENGTHS = [
 
 ANSWER_PROMPT = """Formuliere eine realistische Antwort für die Frage. Formuliere NUR die Antwort, keine weiteren Texte oder Struktur. Sprache: Deutsch, natürlich klingend.
 
-Kontext: {exercise}
-
+KONTEXT:
+{exercise}
 {text}
-
 Frage: {question}
 
 Länge: {length}"""
+
+# Default path for kiso_app_merged_structured.json
+DEFAULT_EXERCISES_JSON = Path("/home/matthias/Kiso/code/projects/summary-prompt-lab/data/processed/kiso_app_merged_structured.json")
 
 
 # --- GENERATION FUNCTIONS ---
@@ -443,15 +445,18 @@ def generate_twins(client: Mistral, count: int, input_path: Path, output_path: P
 
 
 def generate_answers(client: Mistral, input_path: Path, output_path: Path) -> int:
-    """Generate free text answers from exercises JSON.
+    """Generate free text answers from kiso_app_merged_structured.json.
     
-    Extracts patterns where a free_text answer is preceded by a question,
-    which is preceded by a text segment. For each pattern, generates a
-    realistic German answer using Mistral.
+    Extracts patterns where a Text block is followed by a Question with 
+    AnswerOptions="free_text". For each pattern, generates a realistic 
+    German answer using Mistral.
+    
+    JSON structure: Category -> Subcategory -> Exercise Name -> [blocks]
+    Each block is either {"Text": "..."} or {"Question": "...", "AnswerOptions": ...}
     
     Args:
         client: Mistral API client
-        input_path: Path to exercises_nested.json from strapi-to-structured-text
+        input_path: Path to kiso_app_merged_structured.json
         output_path: Path for output CSV file
     
     Returns:
@@ -465,57 +470,45 @@ def generate_answers(client: Mistral, input_path: Path, output_path: Path) -> in
     with open(input_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
-    exercises = data.get("excercises", {}).get("data", [])
-    if not exercises:
-        logger.warning("No exercises found in input file")
-        return 0
-    
     output_path.parent.mkdir(parents=True, exist_ok=True)
     file_exists = output_path.exists()
     generated = 0
     length_idx = 0
     
     # Collect all patterns first for progress bar
+    # Structure: Category -> Subcategory -> Exercise -> [blocks]
     patterns = []
-    for ex in exercises:
-        title = ex.get("Title", "")
-        last_text = None
-        
-        for block in ex.get("Content", []):
-            comp = block.get("__component")
-            
-            # Track rich text blocks
-            if comp == "shared.rich-text":
-                body = block.get("body")
-                if isinstance(body, str) and body.strip():
-                    last_text = body.replace("\n\n", " ").strip()
+    for category, subcategories in data.items():
+        if not isinstance(subcategories, dict):
+            continue
+        for subcategory, exercises in subcategories.items():
+            if not isinstance(exercises, dict):
                 continue
-            
-            # Check for question block with free text input
-            if comp == "user-input.question-block":
-                input_type = block.get("input_type")
-                if input_type == "textarea":
-                    question_text = block.get("question_text")
-                    if not question_text or question_text == "None":
-                        question_text = last_text
+            for exercise_name, blocks in exercises.items():
+                if not isinstance(blocks, list):
+                    continue
+                
+                last_text = None
+                for block in blocks:
+                    # Track Text blocks
+                    if "Text" in block:
+                        text_content = block.get("Text", "")
+                        if isinstance(text_content, str) and text_content.strip():
+                            last_text = text_content.strip()
+                        continue
                     
-                    # We have a valid pattern: text -> question -> free_text
-                    if last_text and question_text:
-                        patterns.append({
-                            "exercise": title,
-                            "text": last_text,
-                            "question": question_text
-                        })
-                continue
-            
-            # Check for textbox component (uses preceding text as question)
-            if comp == "user_input_textbox":
-                if last_text:
-                    patterns.append({
-                        "exercise": title,
-                        "text": last_text,
-                        "question": last_text
-                    })
+                    # Check for Question with free_text AnswerOptions
+                    if "Question" in block:
+                        answer_options = block.get("AnswerOptions")
+                        if answer_options == "free_text":
+                            question_text = block.get("Question", "")
+                            # We have a valid pattern: Text -> Question with free_text
+                            if last_text and question_text:
+                                patterns.append({
+                                    "exercise": exercise_name,
+                                    "text": last_text,
+                                    "question": question_text
+                                })
     
     logger.info(f"Found {len(patterns)} text+question+free_text patterns")
     
@@ -723,9 +716,10 @@ def main():
     clinical_parser.add_argument("--id", required=True, help="Dataset identifier")
     
     # Answers mode (generate free text answers from exercises JSON)
-    answers_parser = subparsers.add_parser("answers", help="Generate free text answers from exercises JSON")
+    answers_parser = subparsers.add_parser("answers", help="Generate free text answers from kiso_app_merged_structured.json")
     answers_parser.add_argument("--id", required=True, help="Dataset identifier")
-    answers_parser.add_argument("--input", "-i", type=Path, required=True, help="Path to exercises_nested.json")
+    answers_parser.add_argument("--input", "-i", type=Path, default=DEFAULT_EXERCISES_JSON,
+                                help="Path to kiso_app_merged_structured.json (default: summary-prompt-lab)")
     
     # All-in-one mode
     all_parser = subparsers.add_parser("all", help="Run all generation modes")
