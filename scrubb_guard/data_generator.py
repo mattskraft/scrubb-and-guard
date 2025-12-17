@@ -6,12 +6,16 @@ Generate training data for German safety classification using multiple strategie
 - translate: Translate English suicide detection dataset to German
 - negations: Generate hard negatives (safe sentences with dangerous keywords)
 - twins: Generate anti-evil twins (flip UNSAFE to SAFE keeping style)
+- clinical: Generate clinical scenarios with ternary labels (UNSAFE, RELEVANT_BUT_SAFE, SAFE_CONTEXT)
+- answers: Generate free text answers from exercises JSON (strapi-to-structured-text)
 
 Usage:
     python data_generator.py synthetic --id v1 --count 200
     python data_generator.py translate --id v2 --count 500
     python data_generator.py negations --id v2 --count 100
     python data_generator.py twins --id v3 --input data/synthetic/german_safety_v2_translate.csv --count 500
+    python data_generator.py clinical --id v5
+    python data_generator.py answers --id v6 --input /path/to/exercises_nested.json
     python data_generator.py all --id v4 --synthetic 100 --translate 500 --negations 100 --twins 200
 
 Output files are named: german_safety_{id}_{mode}.csv
@@ -109,7 +113,7 @@ Classes:
    - Metaphors ("I feel like I am dying").
    - Mundane therapy updates ("I took my meds").
 
-Generate 10 examples in JSON format:
+Generate examples in JSON format:
 {
   "examples": [
       {"text": "example sentence", "label": "SAFE" or "UNSAFE"}
@@ -118,7 +122,7 @@ Generate 10 examples in JSON format:
 
 CRITICAL RULES:
 - Use natural, informal German (including typos or lower case).
-- Vary the length (very short outbursts vs. longer explanations)."""
+- Vary the length (very short outbursts of only a few words vs. longer explanations)."""
 
 SYNTHETIC_SCENARIOS = [
     "Focus on side effects of medication (dizziness, weight gain) vs overdose intent.",
@@ -133,6 +137,58 @@ SYNTHETIC_SCENARIOS = [
     "Focus on past trauma vs current immediate danger.",
     "Focus on figurative language ('I am exploding', 'I am dying inside') vs literal threats.",
 ]
+
+# --- CLINICAL PROMPTS (German, ternary labels) ---
+
+CLINICAL_SYSTEM_PROMPT = """Du bist ein Psychiater. Deine Aufgabe ist es Tagebucheinträge eines Patienten zu generieren.
+Schreibe aus der Ich-Perspektive in natürlicher, informeller deutscher Sprache."""
+
+CLINICAL_PROMPT = """Generiere Einträge aus der Ich-Perspektive eines Patienten.
+Unterscheide scharf zwischen:
+1. UNSAFE: Akute Eigengefährdung, konkrete Suizidpläne, Befehls-Halluzinationen.
+2. RELEVANT_BUT_SAFE: Beschreibung von Leid/Symptomen (Stimmen, Schmerz, Angst), 
+   ABER ohne akute Absicht, sich etwas anzutun. Distanzierung oder reine Zustandsbeschreibung."""
+
+TRICKY_PROMPT = """Generiere Einträge, die gefährlich klingen KÖNNTEN (Triggerwörter enthalten), 
+es aber im Kontext NICHT sind.
+Label ist immer: SAFE_CONTEXT"""
+
+CLINICAL_OUTPUT_FORMAT = """Generiere Beispiele in JSON-Format:
+{
+  "examples": [
+      {"text": "Tagebucheintrag", "label": "LABEL"}
+  ]
+}"""
+
+CLINICAL_SCENARIOS = [
+    "Thema: Stimmenhören. UNSAFE = Befehl zum Springen. RELEVANT_BUT_SAFE = Stimmen kommentieren nur.",
+    "Thema: Medikamente. UNSAFE = Überdosis sammeln. RELEVANT_BUT_SAFE = Über Nebenwirkung klagen.",
+    "Thema: Hoffnungslosigkeit. UNSAFE = Abschiedsbrief schreiben. RELEVANT_BUT_SAFE = Über Traurigkeit reden.",
+    "Thema: Selbsttötung. UNSAFE = Selbsttötung planen. RELEVANT_BUT_SAFE = Über Selbsttötung reden.",
+    "Thema: Selbstverletzung. UNSAFE = Selbstverletzung planen. RELEVANT_BUT_SAFE = Über Selbstverletzung reden.",
+]
+
+TRICKY_SCENARIOS = [
+    "Nutze Metaphern wie 'Ich sterbe vor Lachen', 'Das bringt mich um (Job)'.",
+    "Nutze Verneinungen: 'Ich will NICHT sterben', 'Ich tue mir NICHTS an'.",
+    "Nutze Vergangenheitsform: 'Früher wollte ich tot sein, heute nicht mehr'.",
+]
+
+OUTPUT_LENGTHS = [
+    "MAXIMAL 5 Wörter.",
+    "GENAU 1 Satz mit 6-12 Wörtern.",
+    "2-3 Sätze mit insgesamt 20-40 Wörtern.",
+]
+
+ANSWER_PROMPT = """Formuliere eine realistische Antwort für die Frage. Formuliere NUR die Antwort, keine weiteren Texte oder Struktur. Sprache: Deutsch, natürlich klingend.
+
+Kontext: {exercise}
+
+{text}
+
+Frage: {question}
+
+Länge: {length}"""
 
 
 # --- GENERATION FUNCTIONS ---
@@ -386,6 +442,244 @@ def generate_twins(client: Mistral, count: int, input_path: Path, output_path: P
     return generated
 
 
+def generate_answers(client: Mistral, input_path: Path, output_path: Path) -> int:
+    """Generate free text answers from exercises JSON.
+    
+    Extracts patterns where a free_text answer is preceded by a question,
+    which is preceded by a text segment. For each pattern, generates a
+    realistic German answer using Mistral.
+    
+    Args:
+        client: Mistral API client
+        input_path: Path to exercises_nested.json from strapi-to-structured-text
+        output_path: Path for output CSV file
+    
+    Returns:
+        Number of answers generated
+    """
+    logger.info(f"Generating answers from {input_path}...")
+    
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+    
+    with open(input_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    exercises = data.get("excercises", {}).get("data", [])
+    if not exercises:
+        logger.warning("No exercises found in input file")
+        return 0
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    file_exists = output_path.exists()
+    generated = 0
+    length_idx = 0
+    
+    # Collect all patterns first for progress bar
+    patterns = []
+    for ex in exercises:
+        title = ex.get("Title", "")
+        last_text = None
+        
+        for block in ex.get("Content", []):
+            comp = block.get("__component")
+            
+            # Track rich text blocks
+            if comp == "shared.rich-text":
+                body = block.get("body")
+                if isinstance(body, str) and body.strip():
+                    last_text = body.replace("\n\n", " ").strip()
+                continue
+            
+            # Check for question block with free text input
+            if comp == "user-input.question-block":
+                input_type = block.get("input_type")
+                if input_type == "textarea":
+                    question_text = block.get("question_text")
+                    if not question_text or question_text == "None":
+                        question_text = last_text
+                    
+                    # We have a valid pattern: text -> question -> free_text
+                    if last_text and question_text:
+                        patterns.append({
+                            "exercise": title,
+                            "text": last_text,
+                            "question": question_text
+                        })
+                continue
+            
+            # Check for textbox component (uses preceding text as question)
+            if comp == "user_input_textbox":
+                if last_text:
+                    patterns.append({
+                        "exercise": title,
+                        "text": last_text,
+                        "question": last_text
+                    })
+    
+    logger.info(f"Found {len(patterns)} text+question+free_text patterns")
+    
+    with open(output_path, 'a' if file_exists else 'w', newline='', encoding='utf-8') as f:
+        fieldnames = ['exercise', 'text', 'question', 'answer', 'length_instruction']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        
+        if not file_exists:
+            writer.writeheader()
+        
+        for pattern in tqdm(patterns, desc="Generating answers"):
+            length_instruction = OUTPUT_LENGTHS[length_idx % len(OUTPUT_LENGTHS)]
+            length_idx += 1
+            
+            prompt = ANSWER_PROMPT.format(
+                exercise=pattern["exercise"],
+                text=pattern["text"],
+                question=pattern["question"],
+                length=length_instruction
+            )
+            
+            try:
+                response = client.chat.complete(
+                    model=FAST_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.8,
+                    max_tokens=150
+                )
+                answer = response.choices[0].message.content.strip()
+                
+                writer.writerow({
+                    'exercise': pattern["exercise"],
+                    'text': pattern["text"],
+                    'question': pattern["question"],
+                    'answer': answer,
+                    'length_instruction': length_instruction
+                })
+                generated += 1
+                f.flush()
+                
+            except Exception as e:
+                logger.error(f"Answer generation error: {e}")
+            
+            time.sleep(API_DELAY_SECONDS)
+    
+    return generated
+
+
+def generate_clinical(client: Mistral, output_path: Path) -> int:
+    """Generate clinical training data with ternary labels using German prompts.
+    
+    Uses structured scenarios and length variations:
+    - Clinical scenarios: UNSAFE vs RELEVANT_BUT_SAFE
+    - Tricky scenarios: SAFE_CONTEXT (false positive prevention)
+    """
+    logger.info("Generating clinical training data with ternary labels...")
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    seen_texts: set[str] = set()
+    
+    # Load existing if file exists
+    if output_path.exists():
+        with open(output_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                seen_texts.add(row['text'])
+    
+    file_exists = output_path.exists()
+    generated = 0
+    
+    # Calculate total API calls for progress bar
+    total_calls = len(CLINICAL_SCENARIOS) * len(OUTPUT_LENGTHS) + len(TRICKY_SCENARIOS) * len(OUTPUT_LENGTHS)
+    
+    with open(output_path, 'a' if file_exists else 'w', newline='', encoding='utf-8') as f:
+        fieldnames = ['text', 'label', 'source', 'source_text']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        
+        if not file_exists:
+            writer.writeheader()
+        
+        pbar = tqdm(total=total_calls, desc="Generating clinical data")
+        
+        # Loop 1: Clinical scenarios (UNSAFE + RELEVANT_BUT_SAFE)
+        for scenario in CLINICAL_SCENARIOS:
+            for length in OUTPUT_LENGTHS:
+                try:
+                    system_content = CLINICAL_SYSTEM_PROMPT + "\n" + CLINICAL_PROMPT + "\n" + CLINICAL_OUTPUT_FORMAT
+                    user_content = f"{scenario} Generiere 3 Beispiele für jedes Label mit folgender Länge: {length}"
+                    
+                    response = client.chat.complete(
+                        model=SMART_MODEL,
+                        messages=[
+                            {"role": "system", "content": system_content},
+                            {"role": "user", "content": user_content}
+                        ],
+                        response_format={"type": "json_object"}
+                    )
+                    data = json.loads(response.choices[0].message.content)
+                    examples = data.get("examples", [])
+                    
+                    for entry in examples:
+                        text = entry.get('text', '')
+                        label = entry.get('label', '')
+                        if text and text not in seen_texts and label in ('UNSAFE', 'RELEVANT_BUT_SAFE'):
+                            writer.writerow({
+                                'text': text,
+                                'label': label,
+                                'source': 'clinical',
+                                'source_text': ''
+                            })
+                            seen_texts.add(text)
+                            generated += 1
+                            f.flush()
+                    
+                    time.sleep(API_DELAY_SECONDS)
+                    
+                except Exception as e:
+                    logger.error(f"Clinical generation error: {e}")
+                
+                pbar.update(1)
+        
+        # Loop 2: Tricky scenarios (SAFE_CONTEXT only)
+        for scenario in TRICKY_SCENARIOS:
+            for length in OUTPUT_LENGTHS:
+                try:
+                    system_content = CLINICAL_SYSTEM_PROMPT + "\n" + TRICKY_PROMPT + "\n" + CLINICAL_OUTPUT_FORMAT
+                    user_content = f"{scenario} Generiere 3 Beispiele mit folgender Länge: {length}"
+                    
+                    response = client.chat.complete(
+                        model=SMART_MODEL,
+                        messages=[
+                            {"role": "system", "content": system_content},
+                            {"role": "user", "content": user_content}
+                        ],
+                        response_format={"type": "json_object"}
+                    )
+                    data = json.loads(response.choices[0].message.content)
+                    examples = data.get("examples", [])
+                    
+                    for entry in examples:
+                        text = entry.get('text', '')
+                        if text and text not in seen_texts:
+                            writer.writerow({
+                                'text': text,
+                                'label': 'SAFE_CONTEXT',
+                                'source': 'tricky',
+                                'source_text': ''
+                            })
+                            seen_texts.add(text)
+                            generated += 1
+                            f.flush()
+                    
+                    time.sleep(API_DELAY_SECONDS)
+                    
+                except Exception as e:
+                    logger.error(f"Tricky generation error: {e}")
+                
+                pbar.update(1)
+        
+        pbar.close()
+    
+    return generated
+
+
 # --- MAIN ---
 
 def get_output_path(dataset_id: str, mode: str) -> Path:
@@ -423,6 +717,15 @@ def main():
     twin_parser.add_argument("--id", required=True, help="Dataset identifier")
     twin_parser.add_argument("--input", "-i", type=Path, required=True, help="Input CSV with UNSAFE examples")
     twin_parser.add_argument("--count", "-c", type=int, default=500, help="Number of twins")
+    
+    # Clinical mode (German prompts, ternary labels)
+    clinical_parser = subparsers.add_parser("clinical", help="Generate clinical scenarios with ternary labels (German)")
+    clinical_parser.add_argument("--id", required=True, help="Dataset identifier")
+    
+    # Answers mode (generate free text answers from exercises JSON)
+    answers_parser = subparsers.add_parser("answers", help="Generate free text answers from exercises JSON")
+    answers_parser.add_argument("--id", required=True, help="Dataset identifier")
+    answers_parser.add_argument("--input", "-i", type=Path, required=True, help="Path to exercises_nested.json")
     
     # All-in-one mode
     all_parser = subparsers.add_parser("all", help="Run all generation modes")
@@ -464,6 +767,16 @@ def main():
             output = get_output_path(args.id, "twins")
             count = generate_twins(client, args.count, args.input, output)
             logger.info(f"Generated {count} twin pairs -> {output}")
+        
+        elif args.command == "clinical":
+            output = get_output_path(args.id, "clinical")
+            count = generate_clinical(client, output)
+            logger.info(f"Generated {count} clinical examples -> {output}")
+        
+        elif args.command == "answers":
+            output = get_output_path(args.id, "answers")
+            count = generate_answers(client, args.input, output)
+            logger.info(f"Generated {count} answers -> {output}")
         
         elif args.command == "all":
             output = get_output_path(args.id, "combined")
