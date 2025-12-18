@@ -258,6 +258,10 @@ if selected_model:
         st.subheader("📝 Test Examples")
         st.caption("Click to load an example, or enter your own text below")
         
+        # Helper to load example into text area
+        def load_example(text: str):
+            st.session_state.classify_input = text
+        
         # Example buttons organized by category
         col1, col2 = st.columns(2)
         
@@ -272,7 +276,8 @@ if selected_model:
             ]
             for ex in safe_examples:
                 if st.button(f"'{ex[:35]}..'" if len(ex) > 35 else f"'{ex}'", key=f"safe_{ex[:20]}", use_container_width=True):
-                    st.session_state.test_input = ex
+                    load_example(ex)
+                    st.rerun()
         
         with col2:
             st.markdown("**🔴 Expected UNSAFE:**")
@@ -285,15 +290,14 @@ if selected_model:
             ]
             for ex in unsafe_examples:
                 if st.button(f"'{ex[:35]}..'" if len(ex) > 35 else f"'{ex}'", key=f"unsafe_{ex[:20]}", use_container_width=True):
-                    st.session_state.test_input = ex
+                    load_example(ex)
+                    st.rerun()
         
         st.divider()
         
         # Text input
-        default_text = st.session_state.get("test_input", "")
         user_text = st.text_area(
             "Enter text to classify:",
-            value=default_text,
             height=120,
             placeholder="Gib hier einen Text ein, um ihn zu klassifizieren...",
             key="classify_input"

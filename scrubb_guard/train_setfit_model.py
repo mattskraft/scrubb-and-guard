@@ -85,16 +85,19 @@ def train_model() -> Path:
     
     logger.info(f"Training mit {len(train_dataset)} Beispielen...")
     
-    # Load base model
+    # Load base model with explicit label configuration
     logger.info("Loading SetFit model...")
-    model = SetFitModel.from_pretrained(BASE_MODEL)
+    model = SetFitModel.from_pretrained(
+        BASE_MODEL,
+        labels=["SAFE", "UNSAFE"],  # 0=SAFE, 1=UNSAFE
+    )
     
     # Training arguments (SetFit v1.0+ API)
     args = TrainingArguments(
         output_dir=str(OUTPUT_DIR),
         batch_size=16,
-        num_iterations=20,  # Generates 20 pairs per sentence (data multiplication!)
-        num_epochs=1,       # One epoch is usually enough for SetFit
+        num_iterations=10,  # Generates 20 pairs per sentence (data multiplication!)
+        num_epochs=2,       # 2 epochs for small datasets
         logging_steps=10,
         loss=CosineSimilarityLoss,
     )
