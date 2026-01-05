@@ -352,6 +352,10 @@ if user_text.strip():
         f'<p class="inference-time">Inference: {elapsed_time*1000:.0f}ms</p>',
         unsafe_allow_html=True
     )
+    
+    # Raw output expander
+    with st.expander("📋 Raw Output"):
+        st.json(result.to_dict())
 
 else:
     st.markdown("---")
