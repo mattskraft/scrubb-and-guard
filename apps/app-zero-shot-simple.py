@@ -249,29 +249,58 @@ with st.sidebar:
 # Main content
 st.markdown('<p class="main-title">Zero-shot NLI-based Classifier</p>', unsafe_allow_html=True)
 
+# Hypothesis templates for each language
+HYPOTHESES = {
+    "English": {
+        "primary": "This text is about suicidal intent",
+        "alt": "This text is about something else."
+    },
+    "Deutsch": {
+        "primary": "Dieser Text drückt Suizidgedanken aus.",
+        "alt": "Dieser Text handelt von etwas anderem."
+    }
+}
+
+# Language toggle and contrasting mode in a row
+col_lang, col_contrast = st.columns(2)
+
+with col_lang:
+    use_german = st.toggle(
+        "🇩🇪 German hypotheses",
+        value=False,
+        help="Switch between English and German hypothesis templates."
+    )
+
+with col_contrast:
+    contrasting_mode = st.toggle(
+        "🔀 Contrasting mode",
+        value=True,
+        help="When ON, compares both hypotheses (more accurate). When OFF, scores primary hypothesis independently."
+    )
+
+# Get default values based on language
+lang = "Deutsch" if use_german else "English"
+default_primary = HYPOTHESES[lang]["primary"]
+default_alt = HYPOTHESES[lang]["alt"]
+
 # Hypothesis inputs
 col_hyp1, col_hyp2 = st.columns(2)
 
 with col_hyp1:
     hypothesis = st.text_input(
         "Primary hypothesis:",
-        value="This text is about suicidal intent",
+        value=default_primary,
+        key=f"primary_hyp_{lang}",
         help="The hypothesis to test for."
     )
 
 with col_hyp2:
     alt_hypothesis = st.text_input(
         "Alternative hypothesis:",
-        value="This text is harmless.",
+        value=default_alt,
+        key=f"alt_hyp_{lang}",
         help="Contrasting hypothesis (used when 'Contrasting mode' is enabled)."
     )
-
-# Contrasting mode toggle
-contrasting_mode = st.toggle(
-    "🔀 Contrasting mode",
-    value=True,
-    help="When ON, compares both hypotheses (more accurate). When OFF, scores primary hypothesis independently."
-)
 
 # Text input
 user_text = st.text_area(
