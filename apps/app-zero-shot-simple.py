@@ -10,6 +10,9 @@ import os
 import time
 import random
 import pandas as pd
+import torch
+import torch.nn.functional as F
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # Add parent directory to path to import scrubb_guard package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -165,10 +168,46 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+MODEL_NAME = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+
+
 @st.cache_resource
 def get_classifier():
     """Load classifier once and cache."""
     return ZeroShotClassifier()
+
+
+@st.cache_resource
+def get_raw_nli_model():
+    """Load raw NLI model and tokenizer for direct inference."""
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+    model.eval()
+    return tokenizer, model
+
+
+def predict_nli_raw(text: str, hypothesis: str) -> dict:
+    """
+    Direct NLI inference bypassing the zero-shot-classification pipeline.
+    Returns raw probabilities for contradiction, neutral, and entailment.
+    """
+    tokenizer, model = get_raw_nli_model()
+    
+    # NLI format: [CLS] premise [SEP] hypothesis [SEP]
+    inputs = tokenizer(text, hypothesis, return_tensors="pt", truncation=True)
+    
+    with torch.no_grad():
+        logits = model(**inputs).logits
+    
+    # Softmax to get probabilities
+    probs = F.softmax(logits, dim=1)[0].tolist()
+    
+    # mDeBERTa-xnli label order: 0=contradiction, 1=neutral, 2=entailment
+    return {
+        "contradiction": probs[0],
+        "neutral": probs[1],
+        "entailment": probs[2]
+    }
 
 
 @st.cache_data
@@ -261,21 +300,28 @@ HYPOTHESES = {
     }
 }
 
-# Language toggle and contrasting mode in a row
-col_lang, col_contrast = st.columns(2)
+# Mode toggles in a row
+col_lang, col_contrast, col_raw = st.columns(3)
 
 with col_lang:
     use_german = st.toggle(
-        "🇩🇪 German hypotheses",
+        "🇩🇪 German",
         value=False,
         help="Switch between English and German hypothesis templates."
     )
 
 with col_contrast:
     contrasting_mode = st.toggle(
-        "🔀 Contrasting mode",
+        "🔀 Contrast",
         value=True,
-        help="When ON, compares both hypotheses (more accurate). When OFF, scores primary hypothesis independently."
+        help="Compare both hypotheses (multi_label=False)."
+    )
+
+with col_raw:
+    raw_nli_mode = st.toggle(
+        "🔬 Raw NLI",
+        value=False,
+        help="Bypass pipeline, show raw contradiction/neutral/entailment probabilities."
     )
 
 # Get default values based on language
@@ -312,54 +358,110 @@ user_text = st.text_area(
 
 # Classification
 if user_text.strip():
-    classifier = get_classifier()
-    
     start_time = time.perf_counter()
     
-    if contrasting_mode:
-        # Compare both hypotheses - scores sum to 100%
-        result = classifier.classify(
-            user_text,
-            labels=[hypothesis, alt_hypothesis],
-            multi_label=False,  # Contrasting: scores sum to 1
-            hypothesis_template="{}"
+    if raw_nli_mode:
+        # Direct NLI inference - bypass pipeline
+        nli_result = predict_nli_raw(user_text, hypothesis)
+        elapsed_time = time.perf_counter() - start_time
+        
+        entailment = nli_result["entailment"]
+        score_class = get_score_class(entailment)
+        
+        st.markdown("---")
+        
+        # Show all 3 NLI probabilities
+        st.markdown("##### Raw NLI Probabilities")
+        col_c, col_n, col_e = st.columns(3)
+        
+        with col_c:
+            st.metric(
+                "❌ Contradiction",
+                f"{nli_result['contradiction']:.1%}",
+                help="Text contradicts hypothesis"
+            )
+        with col_n:
+            st.metric(
+                "➖ Neutral",
+                f"{nli_result['neutral']:.1%}",
+                help="Text neither supports nor contradicts"
+            )
+        with col_e:
+            st.metric(
+                "✅ Entailment",
+                f"{nli_result['entailment']:.1%}",
+                help="Text supports/implies hypothesis"
+            )
+        
+        # Also show entailment as main score
+        st.markdown(
+            f'<p class="score-display {score_class}">{entailment:.1%}</p>',
+            unsafe_allow_html=True
         )
-        # Get score for PRIMARY hypothesis (labels are sorted by score, so find the right one)
-        try:
-            primary_idx = result.labels.index(hypothesis)
-            score = result.scores[primary_idx]
-        except (ValueError, IndexError):
-            score = result.scores[0] if result.scores else 0.0
+        st.caption("↑ Entailment score (primary hypothesis)")
+        
+        # Inference time
+        st.markdown(
+            f'<p class="inference-time">Inference: {elapsed_time*1000:.0f}ms</p>',
+            unsafe_allow_html=True
+        )
+        
+        # Raw output expander
+        with st.expander("📋 Raw Output"):
+            st.json({
+                "text": user_text,
+                "hypothesis": hypothesis,
+                "mode": "raw_nli",
+                "probabilities": nli_result
+            })
     else:
-        # Independent scoring of primary hypothesis only
-        result = classifier.classify(
-            user_text,
-            labels=[hypothesis],
-            multi_label=True,  # Independent scoring
-            hypothesis_template="{}"
+        # Use pipeline
+        classifier = get_classifier()
+        
+        if contrasting_mode:
+            # Compare both hypotheses - scores sum to 100%
+            result = classifier.classify(
+                user_text,
+                labels=[hypothesis, alt_hypothesis],
+                multi_label=False,  # Contrasting: scores sum to 1
+                hypothesis_template="{}"
+            )
+            # Get score for PRIMARY hypothesis (labels are sorted by score, so find the right one)
+            try:
+                primary_idx = result.labels.index(hypothesis)
+                score = result.scores[primary_idx]
+            except (ValueError, IndexError):
+                score = result.scores[0] if result.scores else 0.0
+        else:
+            # Independent scoring of primary hypothesis only
+            result = classifier.classify(
+                user_text,
+                labels=[hypothesis],
+                multi_label=True,  # Independent scoring
+                hypothesis_template="{}"
+            )
+            score = result.scores[0] if result.scores else 0.0
+        
+        elapsed_time = time.perf_counter() - start_time
+        
+        score_class = get_score_class(score)
+        
+        # Display score only
+        st.markdown("---")
+        st.markdown(
+            f'<p class="score-display {score_class}">{score:.1%}</p>',
+            unsafe_allow_html=True
         )
-        score = result.scores[0] if result.scores else 0.0
-    
-    elapsed_time = time.perf_counter() - start_time
-    
-    score_class = get_score_class(score)
-    
-    # Display score only
-    st.markdown("---")
-    st.markdown(
-        f'<p class="score-display {score_class}">{score:.1%}</p>',
-        unsafe_allow_html=True
-    )
-    
-    # Inference time at bottom
-    st.markdown(
-        f'<p class="inference-time">Inference: {elapsed_time*1000:.0f}ms</p>',
-        unsafe_allow_html=True
-    )
-    
-    # Raw output expander
-    with st.expander("📋 Raw Output"):
-        st.json(result.to_dict())
+        
+        # Inference time at bottom
+        st.markdown(
+            f'<p class="inference-time">Inference: {elapsed_time*1000:.0f}ms</p>',
+            unsafe_allow_html=True
+        )
+        
+        # Raw output expander
+        with st.expander("📋 Raw Output"):
+            st.json(result.to_dict())
 
 else:
     st.markdown("---")
