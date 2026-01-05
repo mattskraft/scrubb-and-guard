@@ -324,8 +324,12 @@ if user_text.strip():
             multi_label=False,  # Contrasting: scores sum to 1
             hypothesis_template="{}"
         )
-        # Get score for primary hypothesis
-        score = result.scores[0] if result.scores else 0.0
+        # Get score for PRIMARY hypothesis (labels are sorted by score, so find the right one)
+        try:
+            primary_idx = result.labels.index(hypothesis)
+            score = result.scores[primary_idx]
+        except (ValueError, IndexError):
+            score = result.scores[0] if result.scores else 0.0
     else:
         # Independent scoring of primary hypothesis only
         result = classifier.classify(
