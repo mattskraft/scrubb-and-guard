@@ -249,11 +249,28 @@ with st.sidebar:
 # Main content
 st.markdown('<p class="main-title">Zero-shot NLI-based Classifier</p>', unsafe_allow_html=True)
 
-# Hypothesis input
-hypothesis = st.text_input(
-    "Hypothesis:",
-    value="This text is about suicidal intent",
-    help="The hypothesis used for classification. The model checks if the text entails this statement."
+# Hypothesis inputs
+col_hyp1, col_hyp2 = st.columns(2)
+
+with col_hyp1:
+    hypothesis = st.text_input(
+        "Primary hypothesis:",
+        value="This text is about suicidal intent",
+        help="The hypothesis to test for."
+    )
+
+with col_hyp2:
+    alt_hypothesis = st.text_input(
+        "Alternative hypothesis:",
+        value="This text is harmless.",
+        help="Contrasting hypothesis (used when 'Contrasting mode' is enabled)."
+    )
+
+# Contrasting mode toggle
+contrasting_mode = st.toggle(
+    "🔀 Contrasting mode",
+    value=True,
+    help="When ON, compares both hypotheses (more accurate). When OFF, scores primary hypothesis independently."
 )
 
 # Text input
@@ -270,19 +287,28 @@ if user_text.strip():
     
     start_time = time.perf_counter()
     
-    # Use single-label mode with the hypothesis as the label
-    # The hypothesis template will be: "{hypothesis}." → model checks entailment
-    result = classifier.classify(
-        user_text,
-        labels=[hypothesis],
-        multi_label=True,  # Independent scoring
-        hypothesis_template="{}"  # Direct hypothesis, no template wrapper
-    )
+    if contrasting_mode:
+        # Compare both hypotheses - scores sum to 100%
+        result = classifier.classify(
+            user_text,
+            labels=[hypothesis, alt_hypothesis],
+            multi_label=False,  # Contrasting: scores sum to 1
+            hypothesis_template="{}"
+        )
+        # Get score for primary hypothesis
+        score = result.scores[0] if result.scores else 0.0
+    else:
+        # Independent scoring of primary hypothesis only
+        result = classifier.classify(
+            user_text,
+            labels=[hypothesis],
+            multi_label=True,  # Independent scoring
+            hypothesis_template="{}"
+        )
+        score = result.scores[0] if result.scores else 0.0
     
     elapsed_time = time.perf_counter() - start_time
     
-    # Get the score
-    score = result.scores[0] if result.scores else 0.0
     score_class = get_score_class(score)
     
     # Display score only
