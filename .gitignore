@@ -46,6 +46,7 @@ models/
 !data/named_entities/safe_words.txt
 !config/deny_list.txt
 !runtime.txt
+!deploy/**/requirements*.txt
 
 # Secrets
 .env

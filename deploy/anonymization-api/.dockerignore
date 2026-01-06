@@ -1,0 +1,62 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+.eggs/
+*.egg-info/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor/
+
+# Streamlit apps (not needed for API)
+apps/
+
+# Data and models (not needed for anonymization API)
+data/
+models/
+results/
+
+# Documentation
+*.md
+docs/
+
+# Development files
+scripts/
+*.ipynb
+.jupyter/
+
+# Test files
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Other requirements (use requirements-api.txt only)
+requirements.txt
+pyproject.toml
+
+# Runtime files
+runtime.txt
+
+# Temporary files
+*.log
+*.tmp
+.DS_Store
+
+# Other deploy configurations
+deploy/*/
+!deploy/anonymization-api/
