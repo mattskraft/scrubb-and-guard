@@ -10,8 +10,9 @@ presidio-anonymizer==2.2.354
 # NLP - pin to specific version for stability
 spacy==3.7.4
 
-# SpaCy German model (pip-installable URL)
-# Large model for better NER accuracy
+# SpaCy German models (pip-installable URLs)
+# Both models for comparison toggle in app
+https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.7.0/de_core_news_md-3.7.0-py3-none-any.whl
 https://github.com/explosion/spacy-models/releases/download/de_core_news_lg-3.7.0/de_core_news_lg-3.7.0-py3-none-any.whl
 
 # GitHub sync for Streamlit Cloud
