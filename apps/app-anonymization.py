@@ -26,6 +26,7 @@ from scrubb_guard.anonymization_pipeline import (
     save_deny_list,
     DENY_LIST_PATH,
     SPACY_MODEL,
+    SPACY_MODELS,
     ENTITY_DISPLAY,
     ENTITY_LEGEND_LABELS,
 )
@@ -243,36 +244,38 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# Initialize Pipeline (Cached - loads only once)
+# Initialize Pipeline (Cached per model - loads only once per model)
 @st.cache_resource(show_spinner="🔄 Loading SpaCy model and initializing pipeline...")
-def get_pipeline():
-    """Load the PII pipeline once and cache it."""
-    return PiiPipeline()
+def get_pipeline(model_name: str):
+    """Load the PII pipeline once and cache it per model."""
+    return PiiPipeline(model_name=model_name)
 
 
 @st.cache_resource
-def get_model_info():
-    """Get SpaCy and model version info."""
+def get_model_info(model_name: str):
+    """Get SpaCy and model version info for a specific model."""
     try:
-        nlp = spacy.load(SPACY_MODEL)
+        nlp = spacy.load(model_name)
         return {
             "python": sys.version.split()[0],
             "spacy": spacy.__version__,
-            "model_name": nlp.meta.get("name", SPACY_MODEL),
+            "model_name": nlp.meta.get("name", model_name),
             "model_version": nlp.meta.get("version", "unknown"),
+            "model_size": f"{nlp.meta.get('vectors', {}).get('vectors', 0):,} vectors" if nlp.meta.get('vectors') else "n/a",
         }
     except Exception as e:
         return {
             "python": sys.version.split()[0],
             "spacy": spacy.__version__,
-            "model_name": SPACY_MODEL,
+            "model_name": model_name,
             "model_version": f"error: {e}",
+            "model_size": "n/a",
         }
 
 
-# Load the pipeline and model info
-pipeline = get_pipeline()
-model_info = get_model_info()
+# Initialize selected model in session state
+if "selected_model" not in st.session_state:
+    st.session_state.selected_model = SPACY_MODEL  # Default to lg model
 
 
 # Initialize deny list in session state (from file on first load)
@@ -283,6 +286,35 @@ if "deny_list_text" not in st.session_state:
 # Header
 st.markdown('<h1 class="main-title">🔒 PII Anonymizer</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Presidio + SpaCy German NER • Real-time PII Detection & Masking</p>', unsafe_allow_html=True)
+
+# Model Toggle
+st.markdown("##### SpaCy Model")
+model_cols = st.columns([3, 2])
+with model_cols[0]:
+    # Toggle between md and lg models
+    use_large = st.toggle(
+        "Use large model (lg)",
+        value=st.session_state.selected_model == "de_core_news_lg",
+        help="**md** = medium (~40MB, faster) • **lg** = large (~540MB, more accurate)",
+    )
+    st.session_state.selected_model = "de_core_news_lg" if use_large else "de_core_news_md"
+
+# Load the pipeline and model info based on selection
+pipeline = get_pipeline(st.session_state.selected_model)
+model_info = get_model_info(st.session_state.selected_model)
+
+with model_cols[1]:
+    model_badge_color = "#00d4ff" if use_large else "#ffc300"
+    st.markdown(
+        f'<div style="text-align: right; padding-top: 0.3rem;">'
+        f'<span style="background: {model_badge_color}22; border: 1px solid {model_badge_color}; '
+        f'color: {model_badge_color}; padding: 0.3rem 0.8rem; border-radius: 12px; '
+        f'font-family: JetBrains Mono, monospace; font-size: 0.85rem;">'
+        f'{model_info["model_name"]} v{model_info["model_version"]}</span></div>',
+        unsafe_allow_html=True
+    )
+
+st.divider()
 
 # Entity legend (generated from pipeline config)
 st.markdown("##### Detected Entity Types")
@@ -451,13 +483,14 @@ elif process_btn and not user_text:
 
 # Footer
 st.divider()
+model_label = "lg (large)" if "lg" in st.session_state.selected_model else "md (medium)"
 st.markdown(f"""
 <div style="text-align: center; color: #666; font-size: 0.8rem;">
     Powered by <strong>Presidio</strong> + <strong>SpaCy</strong><br>
     🔒 All processing happens locally • No data leaves your machine
 </div>
 <div style="text-align: center; color: #555; font-size: 0.7rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace;">
-    Python {model_info['python']} · spacy {model_info['spacy']} · {model_info['model_name']} v{model_info['model_version']}
+    Python {model_info['python']} · spacy {model_info['spacy']} · {model_info['model_name']} ({model_label})
 </div>
 """, unsafe_allow_html=True)
 

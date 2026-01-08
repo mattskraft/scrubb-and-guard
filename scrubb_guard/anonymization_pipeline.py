@@ -13,8 +13,9 @@ from presidio_anonymizer.entities import OperatorConfig
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("PII_Pipeline")
 
-# SpaCy model name (installed via requirements.txt)
-SPACY_MODEL = "de_core_news_lg"
+# SpaCy model names (installed via requirements.txt)
+SPACY_MODEL = "de_core_news_lg"  # Default model
+SPACY_MODELS = ["de_core_news_md", "de_core_news_lg"]  # Available models for comparison
 
 # Path to deny list config file
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -107,24 +108,25 @@ def save_deny_list(entries: List[str], path: Optional[Path] = None) -> bool:
         return False
 
 class PiiPipeline:
-    def __init__(self, deny_list: Optional[List[str]] = None):
+    def __init__(self, deny_list: Optional[List[str]] = None, model_name: Optional[str] = None):
         """
         Initialisiert die Pipeline.
         Dies sollte beim Start des Cloud Run Containers 1x passieren (Cold Start).
         
         Args:
             deny_list: Optional custom deny list. If None, loads from config file.
+            model_name: SpaCy model to use. Defaults to SPACY_MODEL if not specified.
         """
-        logger.info("Initialisiere PII Pipeline und lade Modelle...")
+        self.model_name = model_name or SPACY_MODEL
+        logger.info(f"Initialisiere PII Pipeline mit Modell: {self.model_name}")
         
         # Load deny list from file or use provided list
         self.deny_list = deny_list if deny_list is not None else load_deny_list()
         
         # 1. SpaCy German Model Configuration
-        # Wir zwingen Presidio, das 'de_core_news_lg' Modell zu nutzen.
         nlp_configuration = {
             "nlp_engine_name": "spacy",
-            "models": [{"lang_code": "de", "model_name": SPACY_MODEL}],
+            "models": [{"lang_code": "de", "model_name": self.model_name}],
         }
         provider = NlpEngineProvider(nlp_configuration=nlp_configuration)
         self.nlp_engine = provider.create_engine()
